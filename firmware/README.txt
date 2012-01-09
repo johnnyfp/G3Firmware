@@ -4,11 +4,9 @@
 
 This is the codebase for the RepRap/Makerbot firmware suite.  The
 currently supported boards are:
-* RepRap Motherboard, v1.2
 * Makerbot Motherboard, v2.0
 
 The toolhead boards supported by the extruder toolhead codebase are:
-* Extruder Controller v2.3
 * Extruder Controller v3.0
 
 This version currently only supports a 20x4 LCD screen.
