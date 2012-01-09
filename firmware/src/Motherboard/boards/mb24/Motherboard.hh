@@ -28,6 +28,8 @@
 #include "InterfaceBoard.hh"
 #include "LiquidCrystal.hh"
 #include "ButtonArray.hh"
+#include "MoodLightController.hh"
+#include "Errors.hh"
 
 
 /// Main class for Motherboard version 2.4+ (Gen4 electronics)
@@ -49,6 +51,8 @@ private:
 
 	/// Microseconds since board initialization
 	volatile micros_t micros;
+	volatile micros_t countupMicros;
+	volatile seconds_t seconds;
 
 	/// Private constructor; use the singleton
 	Motherboard();
@@ -62,6 +66,7 @@ private:
         ButtonArray buttonArray;
         LiquidCrystal lcd;
         InterfaceBoard interfaceBoard;
+	MoodLightController   moodLightController;
 
         MainMenu mainMenu;              ///< Main system menu
         SplashScreen splashScreen;      ///< Displayed at startup
@@ -87,6 +92,8 @@ public:
 	/// the board was initialized.  This value will wrap after
 	/// 2**32 microseconds (ca. 70 minutes); callers should compensate for this.
 	micros_t getCurrentMicros();
+	float getCurrentSeconds();
+	void resetCurrentSeconds();
 
 	/// Write an error code to the debug pin.
 	void indicateError(int errorCode);
@@ -95,6 +102,11 @@ public:
 
 	/// Perform the timer interrupt routine.
 	void doInterrupt();
+ 
+	MoodLightController getMoodLightController();
+	void MoodLightSetRGBColor(uint8_t r, uint8_t g, uint8_t b, uint8_t fadeSpeed, uint8_t writeToEeprom);
+	void MoodLightSetHSBColor(uint8_t r, uint8_t g, uint8_t b, uint8_t fadeSpeed);
+	void MoodLightPlayScript(uint8_t scriptId, uint8_t writeToEeprom);
 };
 
 #endif // BOARDS_MB24_MOTHERBOARD_HH_

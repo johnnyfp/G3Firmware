@@ -38,6 +38,9 @@ namespace steppers {
     ///         otherwise.
     bool isRunning();
 
+    /// Returns true if the stepper subsystem is homing
+    bool isHoming();
+
     /// Abort the current motion and set the stepper subsystem to
     /// the not-running state.
     void abort();
@@ -46,6 +49,10 @@ namespace steppers {
     /// \param[in] index Index of the axis to enable or disable
     /// \param[in] enable If true, enable the axis. If false, disable.
     void enableAxis(uint8_t index, bool enable);
+
+    /// Reports if the axis is enabled or not
+    /// \param[in] index Index of the axis to enable or disable
+    bool isEnabledAxis(uint8_t index);
 
     /// Instruct the stepper subsystem to move the machine to the
     /// given position.
@@ -92,6 +99,12 @@ namespace steppers {
     ///                  through the entire build. If false, it will be
     ///                  disabled when not moving.
     void setHoldZ(bool holdZ);
+
+    //Returns true if the end stop is current depressed
+    bool isAtMaximum(uint8_t index);
+
+    //Returns true if the end stop is current depressed
+    bool isAtMinimum(uint8_t index);
 };
 
 #endif // STEPPERS_HH_

@@ -10,12 +10,13 @@ InterfaceBoard::InterfaceBoard(ButtonArray& buttons_in,
                                const Pin& foo_pin_in,
                                const Pin& bar_pin_in,
                                Screen* mainScreen_in,
-                               Screen* buildScreen_in) :
+                               Screen* buildScreen_in,
+			       MoodLightController& moodLight_in) :
         lcd(lcd_in),
         buttons(buttons_in),
         foo_pin(foo_pin_in),
-        bar_pin(bar_pin_in)
-{
+        bar_pin(bar_pin_in),
+	moodLight(moodLight_in) {
         buildScreen = buildScreen_in;
         mainScreen = mainScreen_in;
 }
@@ -76,6 +77,14 @@ void InterfaceBoard::doUpdate() {
 	}
 
 	screenStack[screenIndex]->update(lcd, false);
+}
+
+bool InterfaceBoard::isButtonPressed(ButtonArray::ButtonName button) {
+	bool buttonPressed = buttons.isButtonPressed(button);
+
+	if ( buttonPressed ) screenStack[screenIndex]->notifyButtonPressed(button);
+
+	return buttonPressed;
 }
 
 void InterfaceBoard::pushScreen(Screen* newScreen) {

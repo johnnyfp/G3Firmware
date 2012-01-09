@@ -70,6 +70,10 @@ public:
         /// \param[in] enable If true, enable the axis; otherwise, disable it.
         void enableStepper(bool enable);
 
+        /// Reports if the stepper motor driver on the given axis is enabled
+        /// \param[in] returns true if enabled, otherwise false
+	bool isEnabledStepper();
+
         /// Reset to initial state
         void reset();
 
@@ -81,6 +85,15 @@ public:
         /// \param[in] intervals Intervals that have passed since the previous interrupt
         /// \return True if the axis is still homing.
         bool doHoming(const int32_t intervals);
+
+        /// Check if the maximum endstop has been triggered for this axis.
+        /// \return True if the axis has triggered its maximum endstop
+        bool isAtMaximum();
+
+        /// Check if the minimum endstop has been triggered for this axis.
+        /// \return True if the axis has triggered its minimum endstop
+        bool isAtMinimum();
+
 };
 
 #endif // STEPPERAXIS_HH

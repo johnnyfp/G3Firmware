@@ -35,6 +35,10 @@ bool isRunning() {
 	return is_running || is_homing;
 }
 
+bool isHoming() {
+	return is_homing;
+}
+
 //public:
 void init(Motherboard& motherboard) {
 	is_running = false;
@@ -133,6 +137,29 @@ void enableAxis(uint8_t index, bool enable) {
                 axes[index].enableStepper(enable);
 	}
 }
+
+/// Report if the given axis is enabled or disabled
+bool isEnabledAxis(uint8_t index) {
+        if (index < STEPPER_COUNT) {
+                axes[index].isEnabledStepper();
+	}
+}
+
+bool isAtMaximum(uint8_t index) {
+        if (index < STEPPER_COUNT) {
+                return axes[index].isAtMaximum();
+	}
+	return false;
+}
+
+
+bool isAtMinimum(uint8_t index) {
+        if (index < STEPPER_COUNT) {
+                return axes[index].isAtMinimum();
+	}
+	return false;
+}
+
 
 bool doInterrupt() {
 	if (is_running) {

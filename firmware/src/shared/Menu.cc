@@ -12,9 +12,15 @@
 #include "Timeout.hh"
 #include "InterfaceBoard.hh"
 #include "Interface.hh"
+#include "Motherboard.hh"
+#include "Version.hh"
 #include <util/delay.h>
 #include <stdlib.h>
 #include "SDCard.hh"
+#include "EepromMap.hh"
+#include "Eeprom.hh"
+#include <avr/eeprom.h>
+#include "ExtruderControl.hh"
 
 
 #define HOST_PACKET_TIMEOUT_MS 20
@@ -23,56 +29,171 @@
 #define HOST_TOOL_RESPONSE_TIMEOUT_MS 50
 #define HOST_TOOL_RESPONSE_TIMEOUT_MICROS (1000L*HOST_TOOL_RESPONSE_TIMEOUT_MS)
 
-/// Send a query packet to the extruder
-bool queryExtruderParameter(uint8_t parameter, OutPacket& responsePacket) {
+#define MAX_ITEMS_PER_SCREEN 4
 
-	Timeout acquire_lock_timeout;
-	acquire_lock_timeout.start(HOST_TOOL_RESPONSE_TIMEOUT_MS);
-	while (!tool::getLock()) {
-		if (acquire_lock_timeout.hasElapsed()) {
-			return false;
+int16_t overrideExtrudeSeconds = 0;
+
+Point pausedPosition;
+
+
+void strcat(char *buf, const char* str)
+{
+	char *ptr = buf;
+	while (*ptr) ptr++;
+	while (*str) *ptr++ = *str++;
+	*ptr++ = '\0';
+}
+
+
+int appendTime(char *buf, uint8_t buflen, uint32_t val)
+{
+	bool hasdigit = false;
+	uint8_t idx = 0;
+	uint8_t written = 0;
+
+	if (buflen < 1) {
+		return written;
+	}
+
+	while (idx < buflen && buf[idx]) idx++;
+	if (idx >= buflen-1) {
+		buf[buflen-1] = '\0';
+		return written;
+	}
+
+	uint8_t radidx = 0;
+	const uint8_t radixcount = 5;
+	const uint8_t houridx = 2;
+	const uint8_t minuteidx = 4;
+	uint32_t radixes[radixcount] = {360000, 36000, 3600, 600, 60};
+	if (val >= 3600000) {
+		val %= 3600000;
+	}
+	for (radidx = 0; radidx < radixcount; radidx++) {
+		char digit = '0';
+		uint8_t bit = 8;
+		uint32_t radshift = radixes[radidx] << 3;
+		for (; bit > 0; bit >>= 1, radshift >>= 1) {
+			if (val > radshift) {
+				val -= radshift;
+				digit += bit;
+			}
+		}
+		if (hasdigit || digit != '0' || radidx >= houridx) {
+			buf[idx++] = digit;
+			hasdigit = true;
+		} else {
+			buf[idx++] = ' ';
+		}
+		if (idx >= buflen) {
+			buf[buflen-1] = '\0';
+			return written;
+		}
+		written++;
+		if (radidx == houridx) {
+			buf[idx++] = 'h';
+			if (idx >= buflen) {
+				buf[buflen-1] = '\0';
+				return written;
+			}
+			written++;
+		}
+		if (radidx == minuteidx) {
+			buf[idx++] = 'm';
+			if (idx >= buflen) {
+				buf[buflen-1] = '\0';
+				return written;
+			}
+			written++;
 		}
 	}
-	OutPacket& out = tool::getOutPacket();
-	InPacket& in = tool::getInPacket();
-	out.reset();
-	responsePacket.reset();
 
-	// Fill the query packet. The first byte is the toolhead index, and the
-	// second is the
-	out.append8(0);
-	out.append8(parameter);
-
-	// Timeouts are handled inside the toolslice code; there's no need
-	// to check for timeouts on this loop.
-	tool::startTransaction();
-	tool::releaseLock();
-	// WHILE: bounded by tool timeout in runToolSlice
-	while (!tool::isTransactionDone()) {
-		tool::runToolSlice();
-	}
-	if (in.getErrorCode() == PacketError::PACKET_TIMEOUT) {
-		return false;
+	if (idx < buflen) {
+		buf[idx] = '\0';
 	} else {
-		// Copy payload back. Start from 0-- we need the response code.
-		for (uint8_t i = 0; i < in.getLength(); i++) {
-			responsePacket.append8(in.read8(i));
+		buf[buflen-1] = '\0';
+	}
+
+	return written;
+}
+
+
+
+int appendUint8(char *buf, uint8_t buflen, uint8_t val)
+{
+	bool hasdigit = false;
+	uint8_t written = 0;
+	uint8_t idx = 0;
+
+	if (buflen < 1) {
+		return written;
+	}
+
+	while (idx < buflen && buf[idx]) idx++;
+	if (idx >= buflen-1) {
+		buf[buflen-1] = '\0';
+		return written;
+	}
+
+	if (val >= 100) {
+		uint8_t res = val / 100;
+		val -= res * 100;
+		buf[idx++] = '0' + res;
+		if (idx >= buflen) {
+			buf[buflen-1] = '\0';
+			return written;
 		}
+		hasdigit = true;
+		written++;
+	} else {
+		buf[idx++] = ' ';
+		if (idx >= buflen) {
+			buf[buflen-1] = '\0';
+			return written;
+		}
+		written++;
 	}
 
-	// Check that the extruder was able to process the request
-	if (!rcCompare(responsePacket.read8(0),RC_OK)) {
-		return false;
+	if (val >= 10 || hasdigit) {
+		uint8_t res = val / 10;
+		val -= res * 10;
+		buf[idx++] = '0' + res;
+		if (idx >= buflen) {
+			buf[buflen-1] = '\0';
+			return written;
+		}
+		hasdigit = true;
+		written++;
+	} else {
+		buf[idx++] = ' ';
+		if (idx >= buflen) {
+			buf[buflen-1] = '\0';
+			return written;
+		}
+		written++;
 	}
 
-	return true;
+	buf[idx++] = '0' + val;
+	if (idx >= buflen) {
+		buf[buflen-1] = '\0';
+		return written;
+	}
+	written++;
+
+	if (idx < buflen) {
+		buf[idx] = '\0';
+	} else {
+		buf[buflen-1] = '\0';
+	}
+
+	return written;
 }
 
 void SplashScreen::update(LiquidCrystal& lcd, bool forceRedraw) {
-	static PROGMEM prog_uchar splash1[] = "                ";
-	static PROGMEM prog_uchar splash2[] = " Thing-O-Matic  ";
-	static PROGMEM prog_uchar splash3[] = "   ---------    ";
-	static PROGMEM prog_uchar splash4[] = "                ";
+	static PROGMEM prog_uchar splash1[] = "                    ";
+	static PROGMEM prog_uchar splash2[] = "  Gen4 Electronics  ";
+	static PROGMEM prog_uchar splash3[] = "  ----------------  ";
+	static PROGMEM prog_uchar splash4[] = "               v3.12";
 
 
 	if (forceRedraw) {
@@ -101,19 +222,183 @@ void SplashScreen::notifyButtonPressed(ButtonArray::ButtonName button) {
 void SplashScreen::reset() {
 }
 
+SetupMode::SetupMode() {
+	itemCount = 8;
+	reset();
+}
+
+void SetupMode::drawItem(uint8_t index, LiquidCrystal& lcd) {
+	const static PROGMEM prog_uchar setupdisp[] = "Setup Display";
+	const static PROGMEM prog_uchar testkeys[] =   "Test Keys";
+	const static PROGMEM prog_uchar moodlight[]= "Mood Light";
+	const static PROGMEM prog_uchar endStops[] = "Test End Stops";
+	const static PROGMEM prog_uchar versions[] = "Version";
+	const static PROGMEM prog_uchar homeAxis[] = "Home Axis";
+	const static PROGMEM prog_uchar mbprefs[] =   "MB Prefs ";
+	const static PROGMEM prog_uchar thprefs[] =   "Toolhead Prefs";
+
+	switch (index) {
+	case 0:
+		lcd.writeFromPgmspace(setupdisp);
+		break;
+	case 1:
+		lcd.writeFromPgmspace(testkeys);
+		break;
+	case 2:
+		lcd.writeFromPgmspace(homeAxis);
+		break;
+  case 3:
+		lcd.writeFromPgmspace(moodlight);
+		break;
+	case 4:
+		lcd.writeFromPgmspace(endStops);
+		break;
+	case 5:
+		lcd.writeFromPgmspace(versions);
+		break;
+	case 6:
+		lcd.writeFromPgmspace(mbprefs);
+		break;
+	case 7:
+		lcd.writeFromPgmspace(thprefs);
+		break;
+	}
+}
+
+
+void SetupMode::handleSelect(uint8_t index) {
+	switch (index) {
+		case 0:
+			// Show monitor build screen
+			//interfaceboard::pushScreen(&displaySetup);
+			break;
+		case 1:
+			// Key Test
+			//interface::pushScreen(&test);
+			break;
+		case 2:
+			// Show home axis
+			interface::pushScreen(&homeAxisMode);
+			break;
+	  case 3:
+			// Show Mood Light Mode
+      interface::pushScreen(&moodLightMode);
+			break;
+		case 4:
+			// Show test end stops menu
+			interface::pushScreen(&testEndStopsMode);
+			break;
+		case 5:
+			// Show build from SD screen
+      interface::pushScreen(&versionMode);
+			break;
+		case 6:
+			break;
+		case 7:
+			break;
+		}
+}
+
+void TestMode::update(LiquidCrystal& lcd, bool forceRedraw) {
+	static PROGMEM prog_uchar line1[] = "To quit press       ";
+	static PROGMEM prog_uchar line2[] = "Zero then Cancel    ";
+	static PROGMEM prog_uchar line3[] = "--------------------";
+	static PROGMEM prog_uchar butt1[] = "-Zero----";
+	static PROGMEM prog_uchar butt2[] = "-Ok------";
+	static PROGMEM prog_uchar butt3[] = "-Y Minus-";
+	static PROGMEM prog_uchar butt4[] = "-Z Minus-";
+	static PROGMEM prog_uchar butt5[] = "-Y Plus--";
+	static PROGMEM prog_uchar butt6[] = "-Z Plus--";
+	static PROGMEM prog_uchar butt7[] = "-X Minus-";
+	static PROGMEM prog_uchar butt8[] = "-X Plus--";
+	static PROGMEM prog_uchar butt9[] = "-Cancel--";
+	if (forceRedraw) {
+		lcd.setCursor(0,0);
+		lcd.writeFromPgmspace(line1);
+		lcd.setCursor(0,1);
+		lcd.writeFromPgmspace(line2);
+		lcd.setCursor(0,2);
+		lcd.writeFromPgmspace(line2);
+	}
+	
+		lcd.setCursor(0,2);
+	switch (buttonPressed) {
+	case ButtonArray::ZERO:
+		lcd.writeFromPgmspace(butt1);
+		break;
+	case ButtonArray::OK:
+		lcd.writeFromPgmspace(butt2);
+		break;
+	case ButtonArray::YMINUS:
+		lcd.writeFromPgmspace(butt3);
+		break;
+	case ButtonArray::ZMINUS:
+		lcd.writeFromPgmspace(butt4);
+		break;
+	case ButtonArray::YPLUS:
+		lcd.writeFromPgmspace(butt5);
+		break;
+	case ButtonArray::ZPLUS:
+		lcd.writeFromPgmspace(butt6);
+		break;
+	case ButtonArray::XMINUS:
+		lcd.writeFromPgmspace(butt7);
+		break;
+	case ButtonArray::XPLUS:
+		lcd.writeFromPgmspace(butt8);
+		break;
+	case ButtonArray::CANCEL:
+		lcd.writeFromPgmspace(butt9);
+		break;
+	}
+}
+
+void TestMode::notifyButtonPressed(ButtonArray::ButtonName button) {
+	switch (button) {
+	case ButtonArray::ZERO:
+	case ButtonArray::OK:
+	case ButtonArray::YMINUS:
+	case ButtonArray::ZMINUS:
+	case ButtonArray::YPLUS:
+	case ButtonArray::ZPLUS:
+	case ButtonArray::XMINUS:
+	case ButtonArray::XPLUS:
+	case ButtonArray::CANCEL:
+		if (buttonPressed==ButtonArray::ZERO) {
+			interface::popScreen();
+			break;
+		}
+	}
+	buttonPressed=button;
+}
+
+void TestMode::reset() {
+}
+
+void DisplaySetupMode::update(LiquidCrystal& lcd, bool forceRedraw) {
+}
+
+void DisplaySetupMode::notifyButtonPressed(ButtonArray::ButtonName button) {
+}
+
+void DisplaySetupMode::reset() {
+}
+
 void JogMode::reset() {
 	jogDistance = DISTANCE_SHORT;
 	distanceChanged = false;
+	lastDirectionButtonPressed = (ButtonArray::ButtonName)0;
 }
 
 void JogMode::update(LiquidCrystal& lcd, bool forceRedraw) {
-	static PROGMEM prog_uchar jog1[] = "Jog mode: ";
-	static PROGMEM prog_uchar jog2[] = "  Y+          Z+";
-	static PROGMEM prog_uchar jog3[] = "X-  X+    (mode)";
-	static PROGMEM prog_uchar jog4[] = "  Y-          Z-";
+	const static PROGMEM prog_uchar jog1[] = "Jog mode: ";
+	const static PROGMEM prog_uchar jog2[] = "   Y+            Z+ ";
+	const static PROGMEM prog_uchar jog3[] = " X-  X+      (mode) ";
+	const static PROGMEM prog_uchar jog4[] = "   Y-            Z- ";
 
-	static PROGMEM prog_uchar distanceShort[] = "SHORT";
-	static PROGMEM prog_uchar distanceLong[] = "LONG";
+	const static PROGMEM prog_uchar distanceShort[] = "SHORT";
+	const static PROGMEM prog_uchar distanceLong[] = "LONG";
+	const static PROGMEM prog_uchar distanceCont[] = "CONT";
 
 	if (forceRedraw || distanceChanged) {
 		lcd.clear();
@@ -126,6 +411,9 @@ void JogMode::update(LiquidCrystal& lcd, bool forceRedraw) {
 			break;
 		case DISTANCE_LONG:
 			lcd.writeFromPgmspace(distanceLong);
+			break;
+		case DISTANCE_CONT:
+			lcd.writeFromPgmspace(distanceCont);
 			break;
 		}
 
@@ -140,6 +428,13 @@ void JogMode::update(LiquidCrystal& lcd, bool forceRedraw) {
 
 		distanceChanged = false;
 	}
+	if ( jogDistance == DISTANCE_CONT ) {
+		if ( lastDirectionButtonPressed ) {
+			if (interface::isButtonPressed(lastDirectionButtonPressed))
+				JogMode::notifyButtonPressed(lastDirectionButtonPressed);
+			else	lastDirectionButtonPressed = (ButtonArray::ButtonName)0;
+		}
+	}
 }
 
 void JogMode::jog(ButtonArray::ButtonName direction) {
@@ -148,12 +443,17 @@ void JogMode::jog(ButtonArray::ButtonName direction) {
 	int32_t interval = 2000;
 	uint8_t steps;
 
+	if ( jogDistance == DISTANCE_CONT )	interval = 1000;
+
 	switch(jogDistance) {
 	case DISTANCE_SHORT:
 		steps = 20;
 		break;
 	case DISTANCE_LONG:
 		steps = 200;
+		break;
+	case DISTANCE_CONT:
+		steps = 50;
 		break;
 	}
 
@@ -178,6 +478,9 @@ void JogMode::jog(ButtonArray::ButtonName direction) {
 		break;
 	}
 
+	if ( jogDistance == DISTANCE_CONT )	lastDirectionButtonPressed = direction;
+	else					lastDirectionButtonPressed = (ButtonArray::ButtonName)0;
+
 	steppers::setTarget(position, interval);
 }
 
@@ -185,11 +488,17 @@ void JogMode::notifyButtonPressed(ButtonArray::ButtonName button) {
 	switch (button) {
         case ButtonArray::ZERO:
         case ButtonArray::OK:
-		if (jogDistance == DISTANCE_SHORT) {
-			jogDistance = DISTANCE_LONG;
-		}
-		else {
-			jogDistance = DISTANCE_SHORT;
+		switch(jogDistance)
+		{
+			case DISTANCE_SHORT:
+				jogDistance = DISTANCE_LONG;
+				break;
+			case DISTANCE_LONG:
+				jogDistance = DISTANCE_CONT;
+				break;
+			case DISTANCE_CONT:
+				jogDistance = DISTANCE_SHORT;
+				break;
 		}
 		distanceChanged = true;
 		break;
@@ -202,14 +511,496 @@ void JogMode::notifyButtonPressed(ButtonArray::ButtonName button) {
 		jog(button);
 		break;
         case ButtonArray::CANCEL:
+		steppers::abort();
+		steppers::enableAxis(0, false);
+		steppers::enableAxis(1, false);
+		steppers::enableAxis(2, false);
                 interface::popScreen();
+		break;
+	}
+}
+
+void ExtruderMode::reset() {
+	extrudeSeconds = (enum extrudeSeconds)eeprom::getEeprom8(eeprom::EXTRUDE_DURATION, 1);
+	updatePhase = 0;
+	timeChanged = false;
+	lastDirection = 1;
+	overrideExtrudeSeconds = 0;
+}
+
+void ExtruderMode::update(LiquidCrystal& lcd, bool forceRedraw) {
+	const static PROGMEM prog_uchar extrude1[] = "Extrude: ";
+	const static PROGMEM prog_uchar extrude2[] = "(set rpm)    Fwd";
+	const static PROGMEM prog_uchar extrude3[] = " (stop)    (dur)";
+	const static PROGMEM prog_uchar extrude4[] = "---/---C     Rev";
+	const static PROGMEM prog_uchar secs[]     = "SECS";
+	const static PROGMEM prog_uchar blank[]    = "       ";
+
+	if (overrideExtrudeSeconds)	extrude(overrideExtrudeSeconds, true);
+
+	if (forceRedraw) {
+		lcd.clear();
+		lcd.setCursor(0,0);
+		lcd.writeFromPgmspace(extrude1);
+
+		lcd.setCursor(0,1);
+		lcd.writeFromPgmspace(extrude2);
+
+		lcd.setCursor(0,2);
+		lcd.writeFromPgmspace(extrude3);
+
+		lcd.setCursor(0,3);
+		lcd.writeFromPgmspace(extrude4);
+	}
+
+	if ((forceRedraw) || (timeChanged)) {
+		lcd.setCursor(9,0);
+		lcd.writeFromPgmspace(blank);
+		lcd.setCursor(9,0);
+		lcd.writeFloat((float)extrudeSeconds, 0);
+		lcd.writeFromPgmspace(secs);
+		timeChanged = false;
+	}
+
+	OutPacket responsePacket;
+	Point position;
+
+	// Redraw tool info
+	switch (updatePhase) {
+	case 0:
+		lcd.setCursor(0,3);
+		if (extruderControl(SLAVE_CMD_GET_TEMP, EXTDR_CMD_GET, responsePacket, 0)) {
+			uint16_t data = responsePacket.read16(1);
+			lcd.writeInt(data,3);
+		} else {
+			lcd.writeString("XXX");
+		}
+		break;
+
+	case 1:
+		lcd.setCursor(4,3);
+		if (extruderControl(SLAVE_CMD_GET_SP, EXTDR_CMD_GET, responsePacket, 0)) {
+			uint16_t data = responsePacket.read16(1);
+			lcd.writeInt(data,3);
+		} else {
+			lcd.writeString("XXX");
+		}
+		break;
+	}
+
+	updatePhase++;
+	if (updatePhase > 1) {
+		updatePhase = 0;
+	}
+}
+
+void ExtruderMode::extrude(seconds_t seconds, bool overrideTempCheck) {
+	//Check we're hot enough
+	if ( ! overrideTempCheck )
+	{
+		OutPacket responsePacket;
+		if (extruderControl(SLAVE_CMD_IS_TOOL_READY, EXTDR_CMD_GET, responsePacket, 0)) {
+			uint8_t data = responsePacket.read8(1);
+		
+			if ( ! data )
+			{
+				overrideExtrudeSeconds = seconds;
+				interface::pushScreen(&extruderTooColdMenu);
+				return;
+			}
+		}
+	}
+
+	Point position = steppers::getPosition();
+
+	float rpm = (float)eeprom::getEeprom8(eeprom::EXTRUDE_RPM, 19) / 10.0;
+
+	//60 * 1000000 = # uS in a minute
+	//200 * 8 = 200 steps per revolution * 1/8 stepping
+	int32_t interval = (int32_t)(60L * 1000000L) / (int32_t)((float)(200 * 8) * rpm);
+	int16_t stepsPerSecond = (int16_t)((200.0 * 8.0 * rpm) / 60.0);
+
+	if ( seconds == 0 )	steppers::abort();
+	else {
+		position[3] += seconds * stepsPerSecond;
+		steppers::setTarget(position, interval);
+	}
+
+	if (overrideTempCheck)	overrideExtrudeSeconds = 0;
+}
+
+void ExtruderMode::notifyButtonPressed(ButtonArray::ButtonName button) {
+	int16_t zReverse = -1;
+
+	switch (button) {
+        	case ButtonArray::OK:
+			switch(extrudeSeconds) {
+                		case EXTRUDE_SECS_1S:
+					extrudeSeconds = EXTRUDE_SECS_2S;
+					break;
+                		case EXTRUDE_SECS_2S:
+					extrudeSeconds = EXTRUDE_SECS_5S;
+					break;
+                		case EXTRUDE_SECS_5S:
+					extrudeSeconds = EXTRUDE_SECS_10S;
+					break;
+				case EXTRUDE_SECS_10S:
+					extrudeSeconds = EXTRUDE_SECS_30S;
+					break;
+				case EXTRUDE_SECS_30S:
+					extrudeSeconds = EXTRUDE_SECS_60S;
+					break;
+				case EXTRUDE_SECS_60S:
+					extrudeSeconds = EXTRUDE_SECS_90S;
+					break;
+				case EXTRUDE_SECS_90S:
+					extrudeSeconds = EXTRUDE_SECS_120S;
+					break;
+                		case EXTRUDE_SECS_120S:
+					extrudeSeconds = EXTRUDE_SECS_240S;
+					break;
+                		case EXTRUDE_SECS_240S:
+					extrudeSeconds = EXTRUDE_SECS_1S;
+					break;
+				default:
+					extrudeSeconds = EXTRUDE_SECS_1S;
+					break;
+			}
+
+			eeprom_write_byte((uint8_t *)eeprom::EXTRUDE_DURATION, (uint8_t)extrudeSeconds);
+
+			//If we're already extruding, change the time running
+			if (steppers::isRunning())
+				extrude((seconds_t)(zReverse * lastDirection * extrudeSeconds), false);
+
+			timeChanged = true;
+			break;
+        	case ButtonArray::YPLUS:
+			// Show Extruder RPM Setting Screen
+                        interface::pushScreen(&extruderSetRpmScreen);
+			break;
+        	case ButtonArray::ZERO:
+        	case ButtonArray::YMINUS:
+        	case ButtonArray::XMINUS:
+        	case ButtonArray::XPLUS:
+			extrude((seconds_t)EXTRUDE_SECS_CANCEL, true);
+        		break;
+        	case ButtonArray::ZMINUS:
+        	case ButtonArray::ZPLUS:
+			if ( button == ButtonArray::ZPLUS )	lastDirection = 1;
+			else					lastDirection = -1;
+			
+			extrude((seconds_t)(zReverse * lastDirection * extrudeSeconds), false);
+			break;
+       	 	case ButtonArray::CANCEL:
+			steppers::abort();
+			steppers::enableAxis(3, false);
+               		interface::popScreen();
+			break;
+	}
+}
+
+
+
+ExtruderTooColdMenu::ExtruderTooColdMenu() {
+	itemCount = 4;
+	reset();
+}
+
+void ExtruderTooColdMenu::resetState() {
+	itemIndex = 2;
+	firstItemIndex = 2;
+}
+
+void ExtruderTooColdMenu::drawItem(uint8_t index, LiquidCrystal& lcd) {
+	const static PROGMEM prog_uchar warning[]  = "Tool0 too cold!";
+	const static PROGMEM prog_uchar cancel[]   =  "Cancel";
+	const static PROGMEM prog_uchar override[] =  "Override";
+
+	switch (index) {
+	case 0:
+		lcd.writeFromPgmspace(warning);
+		break;
+	case 1:
+		break;
+	case 2:
+		lcd.writeFromPgmspace(cancel);
+		break;
+	case 3:
+		lcd.writeFromPgmspace(override);
+		break;
+	}
+}
+
+void ExtruderTooColdMenu::handleSelect(uint8_t index) {
+	switch (index) {
+	case 2:
+		// Cancel extrude
+		overrideExtrudeSeconds = 0;
+		interface::popScreen();
+		break;
+	case 3:
+		// Override and extrude
+                interface::popScreen();
+		break;
+	}
+}
+
+void ExtruderSetRpmScreen::reset() {
+	rpm = eeprom::getEeprom8(eeprom::EXTRUDE_RPM, 19);
+}
+
+void ExtruderSetRpmScreen::update(LiquidCrystal& lcd, bool forceRedraw) {
+	const static PROGMEM prog_uchar message1[] = "Extruder RPM:";
+	const static PROGMEM prog_uchar message4[] = "Up/Dn/Ent to Set";
+	const static PROGMEM prog_uchar blank[]    = " ";
+
+	if (forceRedraw) {
+		lcd.clear();
+
+		lcd.setCursor(0,0);
+		lcd.writeFromPgmspace(message1);
+
+		lcd.setCursor(0,3);
+		lcd.writeFromPgmspace(message4);
+	}
+
+	// Redraw tool info
+	lcd.setCursor(0,1);
+	lcd.writeFloat((float)rpm / 10.0, 1);
+	lcd.writeFromPgmspace(blank);
+}
+
+void ExtruderSetRpmScreen::notifyButtonPressed(ButtonArray::ButtonName button) {
+	switch (button) {
+		case ButtonArray::CANCEL:
+			interface::popScreen();
+			break;
+		case ButtonArray::ZERO:
+		case ButtonArray::OK:
+			eeprom_write_byte((uint8_t *)eeprom::EXTRUDE_RPM, rpm);
+			interface::popScreen();
+			break;
+		case ButtonArray::ZPLUS:
+			// increment more
+			if (rpm <= 250) rpm += 5;
+			break;
+		case ButtonArray::ZMINUS:
+			// decrement more
+			if (rpm >= 8) rpm -= 5;
+			break;
+		case ButtonArray::YPLUS:
+			// increment less
+			if (rpm <= 254) rpm += 1;
+			break;
+		case ButtonArray::YMINUS:
+			// decrement less
+			if (rpm >= 4) rpm -= 1;
+			break;
+		case ButtonArray::XMINUS:
+		case ButtonArray::XPLUS:
+			break;
+	}
+}
+
+
+void MoodLightMode::reset() {
+	updatePhase = 0;
+}
+
+void MoodLightMode::update(LiquidCrystal& lcd, bool forceRedraw) {
+	const static PROGMEM prog_uchar mood1[] = "Mood: ";
+	const static PROGMEM prog_uchar mood3_1[] = "(set RGB)";
+	const static PROGMEM prog_uchar mood3_2[] = "(mood)";
+	const static PROGMEM prog_uchar blank[]   = "          ";
+	const static PROGMEM prog_uchar moodNotPresent1[] = "Mood Light not";
+	const static PROGMEM prog_uchar moodNotPresent2[] = "present!!";
+	const static PROGMEM prog_uchar moodNotPresent3[] = "See Thingiverse";
+	const static PROGMEM prog_uchar moodNotPresent4[] = "   thing:15347";
+
+	//If we have no mood light, point to thingiverse to make one
+	if ( ! interface::moodLightController().blinkM.blinkMIsPresent ) {
+		//Try once more to restart the mood light controller
+		if ( ! interface::moodLightController().start() ) {
+			if ( forceRedraw ) {
+				lcd.clear();
+				lcd.setCursor(0,0);
+				lcd.writeFromPgmspace(moodNotPresent1);
+				lcd.setCursor(0,1);
+				lcd.writeFromPgmspace(moodNotPresent2);
+				lcd.setCursor(0,2);
+				lcd.writeFromPgmspace(moodNotPresent3);
+				lcd.setCursor(0,3);
+				lcd.writeFromPgmspace(moodNotPresent4);
+			}
+		
+			return;
+		}
+	}
+
+	if (forceRedraw) {
+		lcd.clear();
+		lcd.setCursor(0,0);
+		lcd.writeFromPgmspace(mood1);
+
+		lcd.setCursor(10,2);
+		lcd.writeFromPgmspace(mood3_2);
+	}
+
+ 	//Redraw tool info
+	uint8_t scriptId = eeprom_read_byte((uint8_t *)eeprom::MOOD_LIGHT_SCRIPT);
+
+	switch (updatePhase) {
+	case 0:
+		lcd.setCursor(6, 0);
+		lcd.writeFromPgmspace(blank);	
+		lcd.setCursor(6, 0);
+		lcd.writeFromPgmspace(interface::moodLightController().scriptIdToStr(scriptId));	
+		break;
+
+	case 1:
+		lcd.setCursor(0, 2);
+		if ( scriptId == 1 )	lcd.writeFromPgmspace(mood3_1);
+		else			lcd.writeFromPgmspace(blank);	
+		break;
+	}
+
+	updatePhase++;
+	if (updatePhase > 1) {
+		updatePhase = 0;
+	}
+}
+
+
+
+void MoodLightMode::notifyButtonPressed(ButtonArray::ButtonName button) {
+	uint8_t scriptId;
+
+	if ( ! interface::moodLightController().blinkM.blinkMIsPresent )	interface::popScreen();
+
+	switch (button) {
+        	case ButtonArray::OK:
+			//Change the script to the next script id
+			scriptId = eeprom_read_byte((uint8_t *)eeprom::MOOD_LIGHT_SCRIPT);
+			scriptId = interface::moodLightController().nextScriptId(scriptId);
+			eeprom_write_byte((uint8_t *)eeprom::MOOD_LIGHT_SCRIPT, scriptId);
+			interface::moodLightController().playScript(scriptId);
+			break;
+
+        	case ButtonArray::ZERO:
+			scriptId = eeprom_read_byte((uint8_t *)eeprom::MOOD_LIGHT_SCRIPT);
+			if ( scriptId == 1 )
+			{
+				//Set RGB Values
+                        	interface::pushScreen(&moodLightSetRGBScreen);
+			}
+
+			break;
+
+        	case ButtonArray::YPLUS:
+        	case ButtonArray::YMINUS:
+        	case ButtonArray::XMINUS:
+        	case ButtonArray::XPLUS:
+        	case ButtonArray::ZMINUS:
+        	case ButtonArray::ZPLUS:
+        		break;
+
+       	 	case ButtonArray::CANCEL:
+               		interface::popScreen();
+			break;
+	}
+}
+
+
+void MoodLightSetRGBScreen::reset() {
+	inputMode = 0;	//Red
+	redrawScreen = false;
+
+	red   = eeprom::getEeprom8(eeprom::MOOD_LIGHT_CUSTOM_RED,   255);;
+	green = eeprom::getEeprom8(eeprom::MOOD_LIGHT_CUSTOM_GREEN, 255);;
+	blue  = eeprom::getEeprom8(eeprom::MOOD_LIGHT_CUSTOM_BLUE,  255);;
+}
+
+void MoodLightSetRGBScreen::update(LiquidCrystal& lcd, bool forceRedraw) {
+	const static PROGMEM prog_uchar message1_red[]   = "Red:";
+	const static PROGMEM prog_uchar message1_green[] = "Green:";
+	const static PROGMEM prog_uchar message1_blue[]  = "Blue:";
+	const static PROGMEM prog_uchar message4[] = "Up/Dn/Ent to Set";
+
+	if ((forceRedraw) || (redrawScreen)) {
+		lcd.clear();
+
+		lcd.setCursor(0,0);
+		if      ( inputMode == 0 ) lcd.writeFromPgmspace(message1_red);
+		else if ( inputMode == 1 ) lcd.writeFromPgmspace(message1_green);
+		else if ( inputMode == 2 ) lcd.writeFromPgmspace(message1_blue);
+
+		lcd.setCursor(0,3);
+		lcd.writeFromPgmspace(message4);
+
+		redrawScreen = false;
+	}
+
+
+	// Redraw tool info
+	lcd.setCursor(0,1);
+	if      ( inputMode == 0 ) lcd.writeInt(red,  3);
+	else if ( inputMode == 1 ) lcd.writeInt(green,3);
+	else if ( inputMode == 2 ) lcd.writeInt(blue, 3);
+}
+
+void MoodLightSetRGBScreen::notifyButtonPressed(ButtonArray::ButtonName button) {
+	uint8_t *value = &red;
+
+	if 	( inputMode == 1 )	value = &green;
+	else if ( inputMode == 2 )	value = &blue;
+
+	switch (button) {
+        case ButtonArray::CANCEL:
+		interface::popScreen();
+		break;
+        case ButtonArray::ZERO:
+        case ButtonArray::OK:
+		if ( inputMode < 2 ) {
+			inputMode ++;
+			redrawScreen = true;
+		} else {
+			eeprom_write_byte((uint8_t*)eeprom::MOOD_LIGHT_CUSTOM_RED,  red);
+			eeprom_write_byte((uint8_t*)eeprom::MOOD_LIGHT_CUSTOM_GREEN,green);
+			eeprom_write_byte((uint8_t*)eeprom::MOOD_LIGHT_CUSTOM_BLUE, blue);
+
+			//Set the color
+			interface::moodLightController().playScript(1);
+
+			interface::popScreen();
+		}
+		break;
+        case ButtonArray::ZPLUS:
+		// increment more
+		if (*value <= 245) *value += 10;
+		break;
+        case ButtonArray::ZMINUS:
+		// decrement more
+		if (*value >= 10) *value -= 10;
+		break;
+        case ButtonArray::YPLUS:
+		// increment less
+		if (*value <= 254) *value += 1;
+		break;
+        case ButtonArray::YMINUS:
+		// decrement less
+		if (*value >= 1) *value -= 1;
+		break;
+
+        case ButtonArray::XMINUS:
+        case ButtonArray::XPLUS:
 		break;
 	}
 }
 
 
 void SnakeMode::update(LiquidCrystal& lcd, bool forceRedraw) {
-	static PROGMEM prog_uchar gameOver[] =  "GAME OVER!";
+	const static PROGMEM prog_uchar gameOver[] =  "GAME OVER!";
 
 	// If we are dead, restart the game.
 	if (!snakeAlive) {
@@ -331,11 +1122,24 @@ void SnakeMode::notifyButtonPressed(ButtonArray::ButtonName button) {
 
 void MonitorMode::reset() {
 	updatePhase = 0;
+	buildTimePhase = 0;
+	buildComplete = false;
+	extruderStartSeconds = 0.0;
+	lastElapsedSeconds = 0.0;
 }
 
 void MonitorMode::update(LiquidCrystal& lcd, bool forceRedraw) {
-	static PROGMEM prog_uchar extruder_temp[] =   "Tool: ---/---C";
-	static PROGMEM prog_uchar platform_temp[] =   "Bed:  ---/---C";
+	const static PROGMEM prog_uchar extruder_temp[]      =   "Tool: ---/---C";
+	const static PROGMEM prog_uchar platform_temp[]      =   "Bed:  ---/---C";
+	const static PROGMEM prog_uchar elapsed_time[]       =   "Elapsed:   0h00m";
+	const static PROGMEM prog_uchar completed_percent[]  =   "Completed:   0% ";
+	const static PROGMEM prog_uchar time_left[]          =   "TimeLeft:  0h00m";
+	const static PROGMEM prog_uchar time_left_calc[]     =   " calc..";
+	const static PROGMEM prog_uchar time_left_1min[]     =   "  <1min";
+	const static PROGMEM prog_uchar time_left_none[]     =   "   none";
+	const static PROGMEM prog_uchar zpos[] 		     =   "ZPos:           ";
+	const static PROGMEM prog_uchar zpos_mm[] 	     =   "mm";
+	char buf[17];
 
 	if (forceRedraw) {
 		lcd.clear();
@@ -347,6 +1151,8 @@ void MonitorMode::update(LiquidCrystal& lcd, bool forceRedraw) {
 		case host::HOST_STATE_BUILDING:
 		case host::HOST_STATE_BUILDING_FROM_SD:
 			lcd.writeString(host::getBuildName());
+			lcd.setCursor(0,1);
+			lcd.writeFromPgmspace(completed_percent);
 			break;
 		case host::HOST_STATE_ERROR:
 			lcd.writeString("error!");
@@ -369,7 +1175,7 @@ void MonitorMode::update(LiquidCrystal& lcd, bool forceRedraw) {
 	switch (updatePhase) {
 	case 0:
 		lcd.setCursor(6,2);
-		if (queryExtruderParameter(SLAVE_CMD_GET_TEMP, responsePacket)) {
+		if (extruderControl(SLAVE_CMD_GET_TEMP, EXTDR_CMD_GET, responsePacket, 0)) {
 			uint16_t data = responsePacket.read16(1);
 			lcd.writeInt(data,3);
 		} else {
@@ -379,7 +1185,7 @@ void MonitorMode::update(LiquidCrystal& lcd, bool forceRedraw) {
 
 	case 1:
 		lcd.setCursor(10,2);
-		if (queryExtruderParameter(SLAVE_CMD_GET_SP, responsePacket)) {
+		if (extruderControl(SLAVE_CMD_GET_SP, EXTDR_CMD_GET, responsePacket, 0)) {
 			uint16_t data = responsePacket.read16(1);
 			lcd.writeInt(data,3);
 		} else {
@@ -389,7 +1195,7 @@ void MonitorMode::update(LiquidCrystal& lcd, bool forceRedraw) {
 
 	case 2:
 		lcd.setCursor(6,3);
-		if (queryExtruderParameter(SLAVE_CMD_GET_PLATFORM_TEMP, responsePacket)) {
+		if (extruderControl(SLAVE_CMD_GET_PLATFORM_TEMP, EXTDR_CMD_GET, responsePacket, 0)) {
 			uint16_t data = responsePacket.read16(1);
 			lcd.writeInt(data,3);
 		} else {
@@ -399,17 +1205,99 @@ void MonitorMode::update(LiquidCrystal& lcd, bool forceRedraw) {
 
 	case 3:
 		lcd.setCursor(10,3);
-		if (queryExtruderParameter(SLAVE_CMD_GET_PLATFORM_SP, responsePacket)) {
+		if (extruderControl(SLAVE_CMD_GET_PLATFORM_SP, EXTDR_CMD_GET, responsePacket, 0)) {
 			uint16_t data = responsePacket.read16(1);
 			lcd.writeInt(data,3);
 		} else {
 			lcd.writeString("XXX");
 		}
 		break;
+	case 4:
+		enum host::HostState hostState = host::getHostState();
+		
+		if ( (hostState != host::HOST_STATE_BUILDING ) && ( hostState != host::HOST_STATE_BUILDING_FROM_SD )) break;
+
+		float secs;
+
+		//Holding the zero button stops rotation
+        	if ( ! interface::isButtonPressed(ButtonArray::OK) ) buildTimePhase ++;
+
+		if ( buildTimePhase >= 4 )	buildTimePhase = 0;
+
+		switch (buildTimePhase) {
+			case 0:
+				lcd.setCursor(0,1);
+				lcd.writeFromPgmspace(completed_percent);
+				lcd.setCursor(11,1);
+				buf[0] = '\0';
+				appendUint8(buf, sizeof(buf), (uint8_t)sdcard::getPercentPlayed());
+				strcat(buf, "% ");
+				lcd.writeString(buf);
+				break;
+			case 1:
+				lcd.setCursor(0,1);
+				lcd.writeFromPgmspace(elapsed_time);
+				lcd.setCursor(9,1);
+				buf[0] = '\0';
+
+				if ( host::isBuildComplete() ) secs = lastElapsedSeconds; //We stop counting elapsed seconds when we are done
+				else {
+					lastElapsedSeconds = Motherboard::getBoard().getCurrentSeconds();
+					secs = lastElapsedSeconds;
+				}
+				appendTime(buf, sizeof(buf), (uint32_t)secs);
+				lcd.writeString(buf);
+				break;
+			case 2:
+				lcd.setCursor(0,1);
+				lcd.writeFromPgmspace(time_left);
+				lcd.setCursor(9,1);
+
+				if (( sdcard::getPercentPlayed() >= 1.0 ) && ( extruderStartSeconds > 0.0)) {
+					buf[0] = '\0';
+					float currentSeconds = Motherboard::getBoard().getCurrentSeconds() - extruderStartSeconds;
+					secs = ((currentSeconds / sdcard::getPercentPlayed()) * 100.0 ) - currentSeconds;
+
+					if ((secs > 0.0 ) && (secs < 60.0) && ( ! buildComplete ) )
+						lcd.writeFromPgmspace(time_left_1min);	
+					else if (( secs <= 0.0) || ( host::isBuildComplete() ) || ( buildComplete ) ) {
+						buildComplete = true;
+						lcd.writeFromPgmspace(time_left_none);
+					} else {
+						appendTime(buf, sizeof(buf), (uint32_t)secs);
+						lcd.writeString(buf);
+					}
+				}
+				else	lcd.writeFromPgmspace(time_left_calc);
+
+				//Set extruderStartSeconds to when the extruder starts extruding, so we can 
+				//get an accurate TimeLeft:
+				if ( extruderStartSeconds == 0.0 ) {
+					if (extruderControl(SLAVE_CMD_GET_MOTOR_1_PWM, EXTDR_CMD_GET, responsePacket, 0)) {
+						uint8_t pwm = responsePacket.read8(1);
+						if ( pwm ) extruderStartSeconds = Motherboard::getBoard().getCurrentSeconds();
+					}
+				}
+				break;
+			case 3:
+				lcd.setCursor(0,1);
+				lcd.writeFromPgmspace(zpos);
+				lcd.setCursor(6,1);
+
+				Point position = steppers::getPosition();
+			
+				//Divide by 200m because there are 200 steps per mm
+				lcd.writeFloat((float)position[2] / 200.0, 3);
+
+				lcd.writeFromPgmspace(zpos_mm);
+				break;
+		}
+	
+		break;
 	}
 
 	updatePhase++;
-	if (updatePhase > 3) {
+	if (updatePhase > 4) {
 		updatePhase = 0;
 	}
 }
@@ -429,9 +1317,62 @@ void MonitorMode::notifyButtonPressed(ButtonArray::ButtonName button) {
 	}
 }
 
+void VersionMode::reset() {
+}
+
+void VersionMode::update(LiquidCrystal& lcd, bool forceRedraw) {
+	const static PROGMEM prog_uchar version1[] = "  Firmware Version  ";
+	const static PROGMEM prog_uchar version2[] = "  ----------------  ";
+	const static PROGMEM prog_uchar version3[] = "Motherboard: _._";
+	const static PROGMEM prog_uchar version4[] = "   Extruder: _._";
+
+	if (forceRedraw) {
+		lcd.clear();
+
+		lcd.setCursor(0,0);
+		lcd.writeFromPgmspace(version1);
+
+		lcd.setCursor(0,1);
+		lcd.writeFromPgmspace(version2);
+
+		lcd.setCursor(0,2);
+		lcd.writeFromPgmspace(version3);
+
+		lcd.setCursor(0,3);
+		lcd.writeFromPgmspace(version4);
+
+		//Display the motherboard version
+		lcd.setCursor(13, 2);
+		lcd.writeInt(firmware_version / 100, 1);
+
+		lcd.setCursor(15, 2);
+		lcd.writeInt(firmware_version % 100, 1);
+
+		//Display the extruder version
+		OutPacket responsePacket;
+
+		if (extruderControl(SLAVE_CMD_VERSION, EXTDR_CMD_GET, responsePacket, 0)) {
+			uint16_t extruderVersion = responsePacket.read16(1);
+
+			lcd.setCursor(13, 3);
+			lcd.writeInt(extruderVersion / 100, 1);
+
+			lcd.setCursor(15, 3);
+			lcd.writeInt(extruderVersion % 100, 1);
+		} else {
+			lcd.setCursor(13, 3);
+			lcd.writeString("X.X");
+		}
+	} else {
+	}
+}
+
+void VersionMode::notifyButtonPressed(ButtonArray::ButtonName button) {
+	interface::popScreen();
+}
 
 void Menu::update(LiquidCrystal& lcd, bool forceRedraw) {
-	static PROGMEM prog_uchar blankLine[] =  "                ";
+	const static PROGMEM prog_uchar blankLine[] =  "                    ";
 
 	// Do we need to redraw the whole menu?
 	if ((itemIndex/LCD_SCREEN_HEIGHT) != (lastDrawIndex/LCD_SCREEN_HEIGHT)
@@ -483,6 +1424,7 @@ void Menu::handleCancel() {
 }
 
 void Menu::notifyButtonPressed(ButtonArray::ButtonName button) {
+	uint8_t steps = MAX_ITEMS_PER_SCREEN;
 	switch (button) {
         case ButtonArray::ZERO:
         case ButtonArray::OK:
@@ -492,18 +1434,24 @@ void Menu::notifyButtonPressed(ButtonArray::ButtonName button) {
 		handleCancel();
 		break;
         case ButtonArray::YMINUS:
+		steps = 1;
         case ButtonArray::ZMINUS:
 		// increment index
-		if (itemIndex < itemCount - 1) {
-			itemIndex++;
-		}
+		if      (itemIndex < itemCount - steps) 
+			itemIndex+=steps;
+		else if (itemIndex==itemCount-1)
+			itemIndex=firstItemIndex;
+		else	itemIndex=itemCount-1;
 		break;
         case ButtonArray::YPLUS:
+		steps = 1;
         case ButtonArray::ZPLUS:
 		// decrement index
-		if (itemIndex > firstItemIndex) {
-			itemIndex--;
-		}
+		if      (itemIndex-steps > firstItemIndex)
+			itemIndex-=steps;
+		else if (itemIndex==firstItemIndex)
+			itemIndex=itemCount - 1;
+		else	itemIndex=firstItemIndex;
 		break;
 
         case ButtonArray::XMINUS:
@@ -514,37 +1462,59 @@ void Menu::notifyButtonPressed(ButtonArray::ButtonName button) {
 
 
 CancelBuildMenu::CancelBuildMenu() {
-	itemCount = 4;
+	itemCount = MAX_ITEMS_PER_SCREEN;
 	reset();
+	pauseDisabled = false;
+	if ( steppers::isHoming() )	pauseDisabled = true;
 }
 
 void CancelBuildMenu::resetState() {
-	itemIndex = 2;
-	firstItemIndex = 2;
+	pauseDisabled = false;	
+	if ( steppers::isHoming() )	pauseDisabled = true;
+
+	if ( pauseDisabled )	itemIndex = 2;
+	else			itemIndex = 1;
+
+	firstItemIndex = itemIndex;
 }
 
 void CancelBuildMenu::drawItem(uint8_t index, LiquidCrystal& lcd) {
-	static PROGMEM prog_uchar cancel[] = "Cancel Build?";
-	static PROGMEM prog_uchar yes[] =   "Yes";
-	static PROGMEM prog_uchar no[] =   "No";
+	const static PROGMEM prog_uchar stop[]   = "Stop Build?";
+	const static PROGMEM prog_uchar pause[]  = "Pause      ";
+	const static PROGMEM prog_uchar abort[]  = "Abort Print";
+	const static PROGMEM prog_uchar cancel[] = "Cancel     ";
+
+	if ( steppers::isHoming() )	pauseDisabled = true;
 
 	switch (index) {
 	case 0:
-		lcd.writeFromPgmspace(cancel);
+		lcd.writeFromPgmspace(stop);
 		break;
 	case 1:
+		if ( ! pauseDisabled ) {
+			lcd.writeFromPgmspace(pause);
+		}
 		break;
 	case 2:
-		lcd.writeFromPgmspace(yes);
+		lcd.writeFromPgmspace(abort);
 		break;
 	case 3:
-		lcd.writeFromPgmspace(no);
+		lcd.writeFromPgmspace(cancel);
 		break;
 	}
 }
 
 void CancelBuildMenu::handleSelect(uint8_t index) {
+	int32_t interval = 2000;
+
 	switch (index) {
+	case 1:
+		// Pause
+		if ( ! pauseDisabled ) {
+			command::pause(true);
+			interface::pushScreen(&pauseMode);
+		}
+		break;
 	case 2:
 		// Cancel build, returning to whatever menu came before monitor mode.
 		// TODO: Cancel build.
@@ -552,7 +1522,7 @@ void CancelBuildMenu::handleSelect(uint8_t index) {
 		host::stopBuild();
 		break;
 	case 3:
-		// Don't cancel, just close dialog.
+		// Don't cancel print, just close dialog.
                 interface::popScreen();
 		break;
 	}
@@ -560,15 +1530,19 @@ void CancelBuildMenu::handleSelect(uint8_t index) {
 
 
 MainMenu::MainMenu() {
-	itemCount = 5;
+	itemCount = 8;
 	reset();
 }
 
 void MainMenu::drawItem(uint8_t index, LiquidCrystal& lcd) {
-	static PROGMEM prog_uchar monitor[] = "Monitor Mode";
-	static PROGMEM prog_uchar build[] =   "Build from SD";
-	static PROGMEM prog_uchar jog[] =   "Jog Mode";
-	static PROGMEM prog_uchar snake[] =   "Snake Game";
+	const static PROGMEM prog_uchar monitor[] =  "Monitor";
+	const static PROGMEM prog_uchar build[] =    "Build from SD";
+	const static PROGMEM prog_uchar jog[] =      "Jog";
+	const static PROGMEM prog_uchar setup[] =    "Setup";
+	const static PROGMEM prog_uchar preheat[] =  "Preheat";
+	const static PROGMEM prog_uchar extruder[] = "Extrude";
+	const static PROGMEM prog_uchar steppersS[]= "Steppers";
+	const static PROGMEM prog_uchar snake[] =    "Snake Game";
 
 	switch (index) {
 	case 0:
@@ -581,9 +1555,18 @@ void MainMenu::drawItem(uint8_t index, LiquidCrystal& lcd) {
 		lcd.writeFromPgmspace(jog);
 		break;
 	case 3:
-		// blank
+		lcd.writeFromPgmspace(preheat);
 		break;
 	case 4:
+		lcd.writeFromPgmspace(extruder);
+		break;
+	case 5:
+		lcd.writeFromPgmspace(steppersS);
+		break;
+	case 6:
+		lcd.writeFromPgmspace(setup);
+		break;
+	case 7:
 		lcd.writeFromPgmspace(snake);
 		break;
 	}
@@ -593,29 +1576,51 @@ void MainMenu::handleSelect(uint8_t index) {
 	switch (index) {
 		case 0:
 			// Show monitor build screen
-                        interface::pushScreen(&monitorMode);
+      interface::pushScreen(&monitorMode);
 			break;
 		case 1:
 			// Show build from SD screen
-                        interface::pushScreen(&sdMenu);
+      interface::pushScreen(&sdMenu);
 			break;
 		case 2:
 			// Show build from SD screen
-                        interface::pushScreen(&jogger);
+      interface::pushScreen(&jogger);
+			break;
+		case 3:
+			// Show preheat menu
+			interface::pushScreen(&preheatMenu);
+			preheatMenu.fetchTargetTemps();
 			break;
 		case 4:
+			// Show extruder menu
+			interface::pushScreen(&extruderMenu);
+			break;
+		case 5:
+			// Show steppers menu
+			interface::pushScreen(&steppersMenu);
+			break;
+		case 6:
+			// Show build from Setup screen
+			interface::pushScreen(&setup);
+			break;
+		case 7:
 			// Show build from SD screen
-                        interface::pushScreen(&snake);
+      interface::pushScreen(&snake);
 			break;
 		}
 }
 
 SDMenu::SDMenu() {
 	reset();
+	updatePhase = 0;
+	drawItemLockout = false;
 }
 
 void SDMenu::resetState() {
 	itemCount = countFiles();
+	updatePhase = 0;
+	lastItemIndex = 0;
+	drawItemLockout = false;
 }
 
 // Count the number of files on the SD card
@@ -687,7 +1692,7 @@ void SDMenu::drawItem(uint8_t index, LiquidCrystal& lcd) {
 		return;
 	}
 
-	const uint8_t MAX_FILE_LEN = LCD_SCREEN_WIDTH;
+	const uint8_t MAX_FILE_LEN = host::MAX_FILE_LEN;
 	char fnbuf[MAX_FILE_LEN];
 
         if ( !getFilename(index, fnbuf, MAX_FILE_LEN) ) {
@@ -695,10 +1700,51 @@ void SDMenu::drawItem(uint8_t index, LiquidCrystal& lcd) {
 		return;
 	}
 
+	//Figure out length of filename
+	uint8_t filenameLength;
+	for (filenameLength = 0; (filenameLength < MAX_FILE_LEN) && (fnbuf[filenameLength] != 0); filenameLength++) ;
+
 	uint8_t idx;
-	for (idx = 0; (idx < MAX_FILE_LEN) && (fnbuf[idx] != 0); idx++) {
-		lcd.write(fnbuf[idx]);
+	uint8_t longFilenameOffset = 0;
+	uint8_t displayWidth = LCD_SCREEN_WIDTH - 1;
+
+	//Support scrolling filenames that are longer than the lcd screen
+	if (filenameLength >= displayWidth) longFilenameOffset = updatePhase % (filenameLength - displayWidth + 1);
+
+	for (idx = 0; (idx < displayWidth) && (fnbuf[longFilenameOffset + idx] != 0) &&
+		      ((longFilenameOffset + idx) < MAX_FILE_LEN); idx++)
+		lcd.write(fnbuf[longFilenameOffset + idx]);
+
+	//Clear out the rest of the line
+	while ( idx < displayWidth ) {
+		lcd.write(' ');
+		idx ++;
 	}
+}
+
+void SDMenu::update(LiquidCrystal& lcd, bool forceRedraw) {
+	
+	if (( ! forceRedraw ) && ( ! drawItemLockout )) {
+		//Redraw the last item if we have changed
+		if (((itemIndex/LCD_SCREEN_HEIGHT) == (lastDrawIndex/LCD_SCREEN_HEIGHT)) &&
+		     ( itemIndex != lastItemIndex ))  {
+			lcd.setCursor(1,lastItemIndex % LCD_SCREEN_HEIGHT);
+			drawItem(lastItemIndex, lcd);
+		}
+		lastItemIndex = itemIndex;
+
+		lcd.setCursor(1,itemIndex % LCD_SCREEN_HEIGHT);
+		drawItem(itemIndex, lcd);
+	}
+
+	Menu::update(lcd, forceRedraw);
+
+	updatePhase ++;
+}
+
+void SDMenu::notifyButtonPressed(ButtonArray::ButtonName button) {
+	updatePhase = 0;
+	Menu::notifyButtonPressed(button);
 }
 
 void SDMenu::handleSelect(uint8_t index) {
@@ -706,6 +1752,8 @@ void SDMenu::handleSelect(uint8_t index) {
 		// TODO: report error
 		return;
 	}
+
+	drawItemLockout = true;
 
 	char* buildName = host::getBuildName();
 
@@ -720,6 +1768,560 @@ void SDMenu::handleSelect(uint8_t index) {
 		// TODO: report error
 		return;
 	}
+}
+
+
+void Tool0TempSetScreen::reset() {
+	value = eeprom::getEeprom8(eeprom::TOOL0_TEMP, 220);;
+}
+
+void Tool0TempSetScreen::update(LiquidCrystal& lcd, bool forceRedraw) {
+	const static PROGMEM prog_uchar message1[] = "Tool0 Target Temp:";
+	const static PROGMEM prog_uchar message4[] = "Up/Dn/Ent to Set";
+
+	if (forceRedraw) {
+		lcd.clear();
+
+		lcd.setCursor(0,0);
+		lcd.writeFromPgmspace(message1);
+
+		lcd.setCursor(0,3);
+		lcd.writeFromPgmspace(message4);
+	}
+
+
+	// Redraw tool info
+	lcd.setCursor(0,1);
+	lcd.writeInt(value,3);
+}
+
+void Tool0TempSetScreen::notifyButtonPressed(ButtonArray::ButtonName button) {
+	switch (button) {
+        case ButtonArray::CANCEL:
+		interface::popScreen();
+		break;
+        case ButtonArray::ZERO:
+        case ButtonArray::OK:
+		eeprom_write_byte((uint8_t*)eeprom::TOOL0_TEMP,value);
+		interface::popScreen();
+		break;
+        case ButtonArray::ZPLUS:
+		// increment more
+		if (value <= 250) {
+			value += 5;
+		}
+		break;
+        case ButtonArray::ZMINUS:
+		// decrement more
+		if (value >= 5) {
+			value -= 5;
+		}
+		break;
+        case ButtonArray::YPLUS:
+		// increment less
+		if (value <= 254) {
+			value += 1;
+		}
+		break;
+        case ButtonArray::YMINUS:
+		// decrement less
+		if (value >= 1) {
+			value -= 1;
+		}
+		break;
+
+        case ButtonArray::XMINUS:
+        case ButtonArray::XPLUS:
+		break;
+	}
+}
+
+
+void PlatformTempSetScreen::reset() {
+	value = eeprom::getEeprom8(eeprom::PLATFORM_TEMP, 110);;
+}
+
+void PlatformTempSetScreen::update(LiquidCrystal& lcd, bool forceRedraw) {
+	const static PROGMEM prog_uchar message1[] = "Bed Target Temp:";
+	const static PROGMEM prog_uchar message4[] = "Up/Dn/Ent to Set";
+
+	if (forceRedraw) {
+		lcd.clear();
+
+		lcd.setCursor(0,0);
+		lcd.writeFromPgmspace(message1);
+
+		lcd.setCursor(0,3);
+		lcd.writeFromPgmspace(message4);
+	}
+
+
+	// Redraw tool info
+	lcd.setCursor(0,1);
+	lcd.writeInt(value,3);
+}
+
+void PlatformTempSetScreen::notifyButtonPressed(ButtonArray::ButtonName button) {
+	switch (button) {
+        case ButtonArray::CANCEL:
+		interface::popScreen();
+		break;
+        case ButtonArray::ZERO:
+        case ButtonArray::OK:
+		eeprom_write_byte((uint8_t*)eeprom::PLATFORM_TEMP,value);
+		interface::popScreen();
+		break;
+        case ButtonArray::ZPLUS:
+		// increment more
+		if (value <= 250) {
+			value += 5;
+		}
+		break;
+        case ButtonArray::ZMINUS:
+		// decrement more
+		if (value >= 5) {
+			value -= 5;
+		}
+		break;
+        case ButtonArray::YPLUS:
+		// increment less
+		if (value <= 254) {
+			value += 1;
+		}
+		break;
+        case ButtonArray::YMINUS:
+		// decrement less
+		if (value >= 1) {
+			value -= 1;
+		}
+		break;
+
+        case ButtonArray::XMINUS:
+        case ButtonArray::XPLUS:
+		break;
+	}
+}
+
+
+PreheatMenu::PreheatMenu() {
+	itemCount = 4;
+	reset();
+}
+
+void PreheatMenu::fetchTargetTemps() {
+	OutPacket responsePacket;
+	if (extruderControl(SLAVE_CMD_GET_SP, EXTDR_CMD_GET, responsePacket, 0)) {
+		tool0Temp = responsePacket.read16(1);
+	}
+	if (extruderControl(SLAVE_CMD_GET_PLATFORM_SP, EXTDR_CMD_GET, responsePacket, 0)) {
+		platformTemp = responsePacket.read16(1);
+	}
+}
+
+void PreheatMenu::drawItem(uint8_t index, LiquidCrystal& lcd) {
+	const static PROGMEM prog_uchar heat[]     = "Heat ";
+	const static PROGMEM prog_uchar cool[]     = "Cool ";
+	const static PROGMEM prog_uchar tool0[]    = "Tool0";
+	const static PROGMEM prog_uchar platform[] = "Bed";
+	const static PROGMEM prog_uchar tool0set[] = "Set Tool0 Temp";
+	const static PROGMEM prog_uchar platset[]  = "Set Bed Temp";
+
+	switch (index) {
+	case 0:
+		fetchTargetTemps();
+		if (tool0Temp > 0) {
+			lcd.writeFromPgmspace(cool);
+		} else {
+			lcd.writeFromPgmspace(heat);
+		}
+		lcd.writeFromPgmspace(tool0);
+		break;
+	case 1:
+		if (platformTemp > 0) {
+			lcd.writeFromPgmspace(cool);
+		} else {
+			lcd.writeFromPgmspace(heat);
+		}
+		lcd.writeFromPgmspace(platform);
+		break;
+	case 2:
+		lcd.writeFromPgmspace(tool0set);
+		break;
+	case 3:
+		lcd.writeFromPgmspace(platset);
+		break;
+	}
+}
+
+void PreheatMenu::handleSelect(uint8_t index) {
+	OutPacket responsePacket;
+	switch (index) {
+		case 0:
+			// Toggle Extruder heater on/off
+			if (tool0Temp > 0) {
+				extruderControl(SLAVE_CMD_SET_TEMP, EXTDR_CMD_SET, responsePacket, 0);
+			} else {
+				uint8_t value = eeprom::getEeprom8(eeprom::TOOL0_TEMP, 220);
+				extruderControl(SLAVE_CMD_SET_TEMP, EXTDR_CMD_SET, responsePacket, (uint16_t)value);
+			}
+			fetchTargetTemps();
+			lastDrawIndex = 255; // forces redraw.
+			break;
+		case 1:
+			// Toggle Platform heater on/off
+			if (platformTemp > 0) {
+				extruderControl(SLAVE_CMD_SET_PLATFORM_TEMP, EXTDR_CMD_SET, responsePacket, 0);
+			} else {
+				uint8_t value = eeprom::getEeprom8(eeprom::PLATFORM_TEMP, 110);
+				extruderControl(SLAVE_CMD_SET_PLATFORM_TEMP, EXTDR_CMD_SET, responsePacket, value);
+			}
+			fetchTargetTemps();
+			lastDrawIndex = 255; // forces redraw.
+			break;
+		case 2:
+			// Show Extruder Temperature Setting Screen
+                        interface::pushScreen(&tool0TempSetScreen);
+			break;
+		case 3:
+			// Show Platform Temperature Setting Screen
+                        interface::pushScreen(&platTempSetScreen);
+			break;
+		}
+}
+
+void HomeAxisMode::reset() {
+}
+
+void HomeAxisMode::update(LiquidCrystal& lcd, bool forceRedraw) {
+	const static PROGMEM prog_uchar home1[] = "Home Axis: ";
+	const static PROGMEM prog_uchar home2[] = "   Y              Z ";
+	const static PROGMEM prog_uchar home3[] = " X   X              ";
+	const static PROGMEM prog_uchar home4[] = "   Y              Z ";
+
+	if (forceRedraw) {
+		lcd.clear();
+		lcd.setCursor(0,0);
+		lcd.writeFromPgmspace(home1);
+
+		lcd.setCursor(0,1);
+		lcd.writeFromPgmspace(home2);
+
+		lcd.setCursor(0,2);
+		lcd.writeFromPgmspace(home3);
+
+		lcd.setCursor(0,3);
+		lcd.writeFromPgmspace(home4);
+	}
+}
+
+void HomeAxisMode::home(ButtonArray::ButtonName direction) {
+	uint8_t axis = 0;
+	bool 	maximums;
+
+	switch(direction) {
+	        case ButtonArray::XMINUS:
+      		case ButtonArray::XPLUS:
+			axis 	 = 0x01;
+			maximums = true;
+			break;
+        	case ButtonArray::YMINUS:
+        	case ButtonArray::YPLUS:
+			axis 	 = 0x02;
+			maximums = false;
+			break;
+        	case ButtonArray::ZMINUS:
+        	case ButtonArray::ZPLUS:
+			axis 	 = 0x04;
+			maximums = false;
+			break;
+	}
+
+	steppers::startHoming(maximums, axis, (uint32_t)2000);
+}
+
+void HomeAxisMode::notifyButtonPressed(ButtonArray::ButtonName button) {
+	switch (button) {
+        	case ButtonArray::YMINUS:
+        	case ButtonArray::ZMINUS:
+        	case ButtonArray::YPLUS:
+        	case ButtonArray::ZPLUS:
+        	case ButtonArray::XMINUS:
+        	case ButtonArray::XPLUS:
+			home(button);
+			break;
+        	case ButtonArray::ZERO:
+        	case ButtonArray::OK:
+        	case ButtonArray::CANCEL:
+			steppers::abort();
+			steppers::enableAxis(0, false);
+			steppers::enableAxis(1, false);
+			steppers::enableAxis(2, false);
+               		interface::popScreen();
+			break;
+	}
+}
+
+SteppersMenu::SteppersMenu() {
+	itemCount = 4;
+	reset();
+}
+
+void SteppersMenu::resetState() {
+	if (( steppers::isEnabledAxis(0) ) ||
+	    ( steppers::isEnabledAxis(1) ) ||
+	    ( steppers::isEnabledAxis(2) ) ||
+	    ( steppers::isEnabledAxis(3) ))	itemIndex = 3;
+	else					itemIndex = 2;
+	firstItemIndex = 2;
+}
+
+void SteppersMenu::drawItem(uint8_t index, LiquidCrystal& lcd) {
+	const static PROGMEM prog_uchar title[]  = "Stepper Motors:";
+	const static PROGMEM prog_uchar disable[]   =  "Disable";
+	const static PROGMEM prog_uchar enable[] =  "Enable";
+
+	switch (index) {
+	case 0:
+		lcd.writeFromPgmspace(title);
+		break;
+	case 1:
+		break;
+	case 2:
+		lcd.writeFromPgmspace(disable);
+		break;
+	case 3:
+		lcd.writeFromPgmspace(enable);
+		break;
+	}
+}
+
+void SteppersMenu::handleSelect(uint8_t index) {
+	switch (index) {
+		case 2:
+			//Disable Steppers
+			steppers::enableAxis(0, false);
+			steppers::enableAxis(1, false);
+			steppers::enableAxis(2, false);
+			steppers::enableAxis(3, false);
+			interface::popScreen();
+			break;
+		case 3:
+			//Enable Steppers
+			steppers::enableAxis(0, true);
+			steppers::enableAxis(1, true);
+			steppers::enableAxis(2, true);
+			steppers::enableAxis(3, true);
+                	interface::popScreen();
+			break;
+	}
+}
+
+void TestEndStopsMode::reset() {
+}
+
+void TestEndStopsMode::update(LiquidCrystal& lcd, bool forceRedraw) {
+	const static PROGMEM prog_uchar test1[] = "Test End Stops: ";
+	const static PROGMEM prog_uchar test2[] = "(press end stop)";
+	const static PROGMEM prog_uchar test3[] = "XMax:N    YMin:N";
+	const static PROGMEM prog_uchar test4[] = "ZMin:N";
+	const static PROGMEM prog_uchar strY[]  = "Y";
+	const static PROGMEM prog_uchar strN[]  = "N";
+
+	if (forceRedraw) {
+		lcd.clear();
+		lcd.setCursor(0,0);
+		lcd.writeFromPgmspace(test1);
+
+		lcd.setCursor(0,1);
+		lcd.writeFromPgmspace(test2);
+
+		lcd.setCursor(0,2);
+		lcd.writeFromPgmspace(test3);
+
+		lcd.setCursor(0,3);
+		lcd.writeFromPgmspace(test4);
+	}
+
+	lcd.setCursor(5, 2);
+	if ( steppers::isAtMaximum(0) ) lcd.writeFromPgmspace(strY);
+	else				lcd.writeFromPgmspace(strN);
+
+	lcd.setCursor(15, 2);
+	if ( steppers::isAtMinimum(1) ) lcd.writeFromPgmspace(strY);
+	else				lcd.writeFromPgmspace(strN);
+
+	lcd.setCursor(5, 3);
+	if ( steppers::isAtMinimum(2) ) lcd.writeFromPgmspace(strY);
+	else				lcd.writeFromPgmspace(strN);
+}
+
+void TestEndStopsMode::notifyButtonPressed(ButtonArray::ButtonName button) {
+	switch (button) {
+        	case ButtonArray::YMINUS:
+        	case ButtonArray::ZMINUS:
+        	case ButtonArray::YPLUS:
+        	case ButtonArray::ZPLUS:
+        	case ButtonArray::XMINUS:
+        	case ButtonArray::XPLUS:
+        	case ButtonArray::ZERO:
+        	case ButtonArray::OK:
+        	case ButtonArray::CANCEL:
+               		interface::popScreen();
+			break;
+	}
+}
+
+void PauseMode::reset() {
+	pauseState = 0;
+	lastDirectionButtonPressed = (ButtonArray::ButtonName)0;
+}
+
+void PauseMode::jog(ButtonArray::ButtonName direction) {
+	uint8_t steps = 50;
+	bool extrude = false;
+	int32_t interval = 1000;
+	Point position = steppers::getPosition();
+
+	switch(direction) {
+       		case ButtonArray::XMINUS:
+			position[0] -= steps;
+			break;
+        	case ButtonArray::XPLUS:
+			position[0] += steps;
+			break;
+        	case ButtonArray::YMINUS:
+			position[1] -= steps;
+			break;
+       	 	case ButtonArray::YPLUS:
+			position[1] += steps;
+			break;
+        	case ButtonArray::ZMINUS:
+			position[2] -= steps;
+			break;
+       		case ButtonArray::ZPLUS:
+			position[2] += steps;
+			break;
+		case ButtonArray::OK:
+		case ButtonArray::ZERO:
+			float rpm = (float)eeprom::getEeprom8(eeprom::EXTRUDE_RPM, 19) / 10.0;
+
+			//60 * 1000000 = # uS in a minute
+			//200 * 8 = 200 steps per revolution * 1/8 stepping
+			interval = (int32_t)(60L * 1000000L) / (int32_t)((float)(200 * 8) * rpm);
+			int16_t stepsPerSecond = (int16_t)((200.0 * 8.0 * rpm) / 60.0);
+
+			//Handle reverse
+			if ( direction == ButtonArray::OK )	stepsPerSecond *= -1;
+
+			//Extrude for 0.5 seconds
+			position[3] += 0.5 * stepsPerSecond;
+			break;
+	}
+
+	lastDirectionButtonPressed = direction;
+
+	steppers::setTarget(position, interval);
+}
+
+
+void PauseMode::update(LiquidCrystal& lcd, bool forceRedraw) {
+	const static PROGMEM prog_uchar waitForCurrentCommand[] = "Entering pause..";
+	const static PROGMEM prog_uchar movingZ[] 		= "Moving Z up 2mm ";
+	const static PROGMEM prog_uchar leavingPaused[]		= "Leaving pause.. ";
+	const static PROGMEM prog_uchar paused1[] 		= "Paused:         ";
+	const static PROGMEM prog_uchar paused2[] 		= "    Y+           Z+ ";
+	const static PROGMEM prog_uchar paused3[] 		= " X- Rev X+    (Fwd) ";
+	const static PROGMEM prog_uchar paused4[] 		= "    Y-           Z- ";
+
+	int32_t interval = 2000;
+	Point newPosition = pausedPosition;
+
+	if (forceRedraw)	lcd.clear();
+
+	lcd.setCursor(0,0);
+
+	switch (pauseState) {
+		case 0:	//Entered pause, waiting for steppers to finish last command
+			lcd.writeFromPgmspace(waitForCurrentCommand);
+
+			if ( ! steppers::isRunning()) pauseState ++;
+			break;
+
+		case 1: //Last command finished, record current position and move
+			//Z away from build
+			lcd.writeFromPgmspace(movingZ);
+
+			pausedPosition = steppers::getPosition();
+			newPosition = pausedPosition;
+			newPosition[2] += 2 * 200;	//200 because of the number of steps per mm
+			steppers::setTarget(newPosition, interval);
+			
+			pauseState ++;
+			break;
+
+		case 2: //Wait for the Z move up to complete
+			lcd.writeFromPgmspace(movingZ);
+			if ( ! steppers::isRunning()) {
+				pauseState ++;
+
+				//We write this here to avoid tieing up the processor
+				//in the next state
+				lcd.clear();
+				lcd.writeFromPgmspace(paused1);
+				lcd.setCursor(0,1);
+				lcd.writeFromPgmspace(paused2);
+				lcd.setCursor(0,2);
+				lcd.writeFromPgmspace(paused3);
+				lcd.setCursor(0,3);
+				lcd.writeFromPgmspace(paused4);
+			}
+			break;
+	
+		case 3: //We're now paused
+			break;
+
+		case 4: //Leaving paused, wait for any steppers to finish
+			lcd.clear();
+			lcd.writeFromPgmspace(leavingPaused);
+			if ( ! steppers::isRunning()) pauseState ++;
+			break;
+
+		case 5:	//Return to original position
+			lcd.writeFromPgmspace(leavingPaused);
+
+			//The extruders may have moved, so it doesn't make sense
+			//to go back to the old position, or we'll eject the filament
+			newPosition = steppers::getPosition();
+			pausedPosition[3] = newPosition[3];
+			pausedPosition[4] = newPosition[4];
+
+			steppers::setTarget(pausedPosition, interval);
+			pauseState ++;
+			break;
+
+		case 6: //Wait for return to original position
+			lcd.writeFromPgmspace(leavingPaused);
+			if ( ! steppers::isRunning()) {
+				pauseState = 0;
+                		interface::popScreen();
+                		interface::popScreen();
+				command::pause(false);
+			}
+			break;
+	}
+
+	if ( lastDirectionButtonPressed ) {
+		if (interface::isButtonPressed(lastDirectionButtonPressed))
+			jog(lastDirectionButtonPressed);
+		else	lastDirectionButtonPressed = (ButtonArray::ButtonName)0;
+	}
+}
+
+void PauseMode::notifyButtonPressed(ButtonArray::ButtonName button) {
+	if ( button == ButtonArray::CANCEL ) {
+		if ( pauseState == 3 )	pauseState ++;
+	}
+	else jog(button);
 }
 
 #endif

@@ -49,6 +49,24 @@ const static uint16_t MACHINE_NAME				= 0x0020;
 /// Default locations for the axis: 5 x 32 bit = 20 bytes
 const static uint16_t AXIS_HOME_POSITIONS		= 0x0060;
 
+// Estop configuration byte: 1 byte.
+const static uint16_t ESTOP_CONFIGURATION = 0x0074;
+
+enum {
+	ESTOP_CONF_NONE = 0x0,
+	ESTOP_CONF_ACTIVE_HIGH = 0x1,
+	ESTOP_CONF_ACTIVE_LOW = 0x2
+};
+
+const static uint16_t TOOL0_TEMP      		= 0x0080;
+const static uint16_t TOOL1_TEMP      		= 0x0081;
+const static uint16_t PLATFORM_TEMP   		= 0x0082;
+const static uint16_t EXTRUDE_DURATION		= 0x0083;
+const static uint16_t EXTRUDE_RPM     		= 0x0084;
+const static uint16_t MOOD_LIGHT_SCRIPT		= 0x0085;
+const static uint16_t MOOD_LIGHT_CUSTOM_RED	= 0x0086;
+const static uint16_t MOOD_LIGHT_CUSTOM_GREEN	= 0x0087;
+const static uint16_t MOOD_LIGHT_CUSTOM_BLUE	= 0x0088;
 
 /// Reset all data in the EEPROM to a default.
 void setDefaults();

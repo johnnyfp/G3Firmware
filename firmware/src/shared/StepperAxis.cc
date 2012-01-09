@@ -41,6 +41,10 @@ void StepperAxis::enableStepper(bool enable) {
         interface->setEnabled(enable);
 }
 
+bool StepperAxis::isEnabledStepper() {
+        return interface->getEnabled();
+}
+
 void StepperAxis::reset() {
         position = 0;
         minimum = 0;
@@ -137,4 +141,14 @@ bool StepperAxis::doHoming(const int32_t intervals) {
                 interface->step(false);
         }
         return true;
+}
+
+
+bool StepperAxis::isAtMaximum() {
+	return interface->isAtMaximum();
+}
+
+
+bool StepperAxis::isAtMinimum() {
+	return interface->isAtMinimum();
 }
