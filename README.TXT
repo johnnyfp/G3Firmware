@@ -1,5 +1,6 @@
-This is the firmware source for the RepRap Generation 3 and MakerBot 
-Generation 4 board sets.
+This is the firmware source for the MakerBot Generation 4 board sets. 
+This version includes changes made by Jetty840 and support for a 20x4
+LCD display.
 
 If you're getting started, please begin by reading the documentation for
 the firmware:
