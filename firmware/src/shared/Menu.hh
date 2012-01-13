@@ -79,6 +79,14 @@ protected:
 
 /// Display a welcome splash screen, that removes itself when updated.
 class SplashScreen: public Screen {
+private:
+
+#ifndef VERSION
+#error "Version not defined! Please define the version number for this build."
+#endif
+
+
+
 public:
 	micros_t getUpdateRate() {return 50L * 1000L;}
 
@@ -87,22 +95,47 @@ public:
 	void reset();
 
         void notifyButtonPressed(ButtonArray::ButtonName button);
+};
+
+class NYI: public Screen {     
+public:
+  micros_t getUpdateRate() {return 500L * 1000L;}
+	void update(LiquidCrystal& lcd, bool forceRedraw);
+	void reset();
+  void notifyButtonPressed(ButtonArray::ButtonName button);
+private:
+  uint8_t waitfor;
+};
+
+class UserViewMenu: public Menu {
+public:
+	UserViewMenu();
+
+	void resetState();
+protected:
+	void drawItem(uint8_t index, LiquidCrystal& lcd);
+
+	void handleSelect(uint8_t index);
 };
 
 
 class JogMode: public Screen {
 private:
 	enum distance_t {
-	  DISTANCE_SHORT,
+	  DISTANCE_SHORT = 0,
 	  DISTANCE_LONG,
 	  DISTANCE_CONT,
 	};
 
+	UserViewMenu userViewMenu;
+
 	distance_t jogDistance;
 	bool distanceChanged;
+	bool userViewMode;
+	bool userViewModeChanged;
 	ButtonArray::ButtonName lastDirectionButtonPressed;
 
-        void jog(ButtonArray::ButtonName direction);
+  void jog(ButtonArray::ButtonName direction);
 
 public:
 	micros_t getUpdateRate() {return 50L * 1000L;}
@@ -111,50 +144,6 @@ public:
 
 	void reset();
 
-        void notifyButtonPressed(ButtonArray::ButtonName button);
-};
-
-/// This is an easter egg.
-class SnakeMode: public Screen {
-
-#define MAX_SNAKE_SIZE 20      ///< Maximum length our snake can grow to
-#define APPLES_BEFORE_GROW 4   ///< Number of apples the snake must eat before growing
-#define START_SPEED  60        ///< Starting speed, in screen refresh times per turn
-
-
-private:
-	micros_t updateRate;
-
-	struct coord_t {
-		int8_t x;
-		int8_t y;
-	};
-
-	enum direction_t {
-	  DIR_NORTH,
-	  DIR_EAST,
-	  DIR_SOUTH,
-	  DIR_WEST
-	};
-
-	int snakeLength;					// Length of our snake; this grows for every x 'apples' eaten
-	coord_t snakeBody[MAX_SNAKE_SIZE];	// Table of each piece of the snakes body
-	bool snakeAlive;					// The state of our snake
-	direction_t snakeDirection;			// The direction the snake is heading
-	coord_t applePosition;				// Location of the apple
-	uint8_t applesEaten;				// Number of apples that have been eaten
-//	int gameSpeed = START_SPEED;		// Speed of the game (in ms per turn)
-
-
-public:
-	micros_t getUpdateRate() {return updateRate;}
-
-	// Refresh the display information
-	void update(LiquidCrystal& lcd, bool forceRedraw);
-
-	void reset();
-
-	// Get notified that a button was pressed
         void notifyButtonPressed(ButtonArray::ButtonName button);
 };
 
@@ -163,6 +152,7 @@ class SDMenu: public Menu {
 private:
 	uint8_t updatePhase;
 	uint8_t lastItemIndex;
+	bool  dir;
 	bool	drawItemLockout;
 public:
 	SDMenu();
@@ -195,14 +185,31 @@ private:
 	uint8_t pauseState;
 
 public:
+ 	bool autoPause;
+
 	micros_t getUpdateRate() {return 50L * 1000L;}
 
 	void update(LiquidCrystal& lcd, bool forceRedraw);
 
 	void reset();
 
-        void notifyButtonPressed(ButtonArray::ButtonName button);
+  void notifyButtonPressed(ButtonArray::ButtonName button);
 };
+
+class PauseAtZPosScreen: public Screen {
+private:
+	float pauseAtZPos;
+
+public:
+	micros_t getUpdateRate() {return 50L * 1000L;}
+
+	void update(LiquidCrystal& lcd, bool forceRedraw);
+
+	void reset();
+
+  void notifyButtonPressed(ButtonArray::ButtonName button);
+};
+
 
 
 class CancelBuildMenu: public Menu {
@@ -215,8 +222,10 @@ protected:
 
 	void handleSelect(uint8_t index);
 private:
-	PauseMode	pauseMode;
-	bool		pauseDisabled;
+	PauseMode	        pauseMode;
+	bool		          pauseDisabled;
+	PauseAtZPosScreen	pauseAtZPosScreen;
+
 };
 
 
@@ -228,7 +237,10 @@ private:
 	uint8_t buildTimePhase;
 	float   lastElapsedSeconds;
 	float   extruderStartSeconds; 
-	bool	buildComplete;		//For solving floating point rounding issues
+	bool	  buildComplete;		//For solving floating point rounding issues
+	PauseMode pauseMode;
+	bool	pausePushLockout;
+
 
 public:
 	micros_t getUpdateRate() {return 500L * 1000L;}
@@ -269,6 +281,28 @@ public:
 
 	// Get notified that a button was pressed
 	void notifyButtonPressed(ButtonArray::ButtonName button);
+private:
+  uint8_t initSize;
+  uint8_t selSize;
+  bool resetRequired;
+};
+
+class ZAxisRevs: public Screen {
+public:
+	micros_t getUpdateRate() {return 500L * 1000L;}
+
+	// Refresh the display information
+	void update(LiquidCrystal& lcd, bool forceRedraw);
+
+	// Reset the menu to it's default state
+	void reset();
+
+	// Get notified that a button was pressed
+	void notifyButtonPressed(ButtonArray::ButtonName button);
+private:
+  uint16_t wholePart;
+  uint16_t fracPart;
+  uint8_t selSize;
 };
 
 class VersionMode: public Screen {
@@ -338,12 +372,12 @@ private:
 class ExtruderTooColdMenu: public Menu {
 public:
 	ExtruderTooColdMenu();
-
 	void resetState();
+	
 protected:
 	void drawItem(uint8_t index, LiquidCrystal& lcd);
-
 	void handleSelect(uint8_t index);
+	
 };
 
 class ExtruderSetRpmScreen: public Screen {
@@ -382,6 +416,7 @@ private:
         ExtruderSetRpmScreen extruderSetRpmScreen;
 
 	uint8_t updatePhase;
+	uint16_t elapsedTime;
 
 	void extrude(seconds_t steps, bool overrideTempCheck);
 
@@ -456,6 +491,18 @@ protected:
 	void handleSelect(uint8_t index);
 };
 
+class MBMenu: public Menu {
+public:
+	MBMenu();
+
+protected:
+	void drawItem(uint8_t index, LiquidCrystal& lcd);
+	void handleSelect(uint8_t index);
+private:
+  NYI notyetimplemented;
+  ZAxisRevs zaxisrevs;
+};
+
 class TestEndStopsMode: public Screen {
 private:
 
@@ -482,6 +529,10 @@ private:
 	TestEndStopsMode testEndStopsMode;
   VersionMode versionMode;
 	MoodLightMode	moodLightMode;
+	MBMenu mbPrefMenu;
+	TestMode test;
+	DisplaySetupMode displaySetup;
+	NYI notyetimplemented;
 };
 
 
@@ -501,10 +552,8 @@ private:
 				PreheatMenu preheatMenu;
 				ExtruderMode extruderMenu;
 				SteppersMenu steppersMenu;
-        SnakeMode snake;
 				SetupMode setup;
-				TestMode test;
-				DisplaySetupMode displaySetup;
+				
 };
 
 #endif

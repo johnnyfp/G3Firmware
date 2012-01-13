@@ -3,6 +3,9 @@
 #include <stdio.h>
 #include <string.h>
 #include <util/delay.h>
+#include "EepromMap.hh"
+#include "Eeprom.hh"
+#include <avr/eeprom.h>
 
 // When the display powers up, it is configured as follows:
 //
@@ -76,7 +79,12 @@ void LiquidCrystal::init(uint8_t fourbitmode, Pin rs, Pin rw, Pin enable,
   else 
     _displayfunction = LCD_8BITMODE | LCD_1LINE | LCD_5x8DOTS;
   
-  begin(20, 1);  
+  dispsize = eeprom::getEeprom16(eeprom::DISPLAY_SIZE,16);
+  row_offsets[0] = 0x00;
+  row_offsets[1] = 0x40; 
+  row_offsets[2] = dispsize;
+  row_offsets[3] = 0x40+dispsize;
+  begin(dispsize, 1);  
 }
 
 void LiquidCrystal::begin(uint8_t cols, uint8_t lines, uint8_t dotsize) {
@@ -169,7 +177,7 @@ void LiquidCrystal::home()
 
 void LiquidCrystal::setCursor(uint8_t col, uint8_t row)
 {
-  int row_offsets[] = { 0x00, 0x40, 0x14, 0x54 };
+  
   if ( row > _numlines ) {
     row = _numlines-1;    // we count rows starting w/0
   }
@@ -357,6 +365,16 @@ void LiquidCrystal::writeFromPgmspace(const prog_uchar message[]) {
 	}
 }
 
+void LiquidCrystal::writeBlankLine(uint8_t line) {
+	int i;
+	
+	setCursor(0,line);
+	
+	for (i=0;i<dispsize;i++) {
+		write(' ');
+	}
+}
+
 /************ low level data pushing commands **********/
 
 // write either command or data, with automatic 4/8-bit selection
@@ -401,4 +419,8 @@ void LiquidCrystal::write8bits(uint8_t value) {
   }
   
   pulseEnable();
+}
+
+uint8_t LiquidCrystal::getDisplayWidth() {
+	return dispsize;
 }

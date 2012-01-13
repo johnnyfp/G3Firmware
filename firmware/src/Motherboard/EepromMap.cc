@@ -39,6 +39,11 @@ void setDefaults() {
     eeprom_write_byte((uint8_t*)eeprom::MOOD_LIGHT_CUSTOM_RED,255);
     eeprom_write_byte((uint8_t*)eeprom::MOOD_LIGHT_CUSTOM_GREEN,255);
     eeprom_write_byte((uint8_t*)eeprom::MOOD_LIGHT_CUSTOM_BLUE,255);
+    eeprom_write_byte((uint8_t*)eeprom::JOG_MODE_SETTINGS,0);
+    eeprom_write_byte((uint8_t*)eeprom::AXIS_HOME_MINMAX,0b00000100);
+    eeprom_write_byte((uint8_t*)eeprom::AXIS_HOME_DIR,0b00000000);
+    eeprom_write_byte((uint8_t*)eeprom::ZAXIS_MM_PER_TURN_W,200);
+    eeprom_write_byte((uint8_t*)eeprom::ZAXIS_MM_PER_TURN_P,0);
 }
 
 }

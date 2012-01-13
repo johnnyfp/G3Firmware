@@ -26,6 +26,7 @@
 #include <avr/eeprom.h>
 #include "EepromMap.hh"
 #include "SDCard.hh"
+#include "Eeprom.hh"
 #include "ExtruderControl.hh"
 
 namespace command {
@@ -37,10 +38,15 @@ CircularBuffer command_buffer(COMMAND_BUFFER_SIZE, buffer_data);
 bool outstanding_tool_command = false;
 
 bool paused = false;
+bool pauseOnZ = false;
 
 uint16_t statusDivisor = 0;
+int32_t z;
+int32_t oldz;
 volatile uint32_t recentCommandClock = 0;
 volatile uint32_t recentCommandTime = 0;
+volatile float	  pauseZPos = 0.0;
+
 
 uint16_t getRemainingCapacity() {
 	uint16_t sz;
@@ -50,13 +56,34 @@ uint16_t getRemainingCapacity() {
 	return sz;
 }
 
+float getRevsPerMM(){
+	uint16_t whole = eeprom::getEeprom16(eeprom::ZAXIS_MM_PER_TURN_W, 200);
+	uint16_t frac  = eeprom::getEeprom16(eeprom::ZAXIS_MM_PER_TURN_P, 0);
+	return ((float)whole+((float)frac/10000));	
+}
+
 void pause(bool pause) {
 	paused = pause;
+	if (!pause) pauseOnZ=false;
+}
+
+void pauseNextZ(bool pause) {
+	pauseOnZ = pause;
+	if (!pause) paused=false;
 }
 
 bool isPaused() {
 	return paused;
 }
+
+void pauseAtZPos(float zpos) {
+	pauseZPos = zpos;
+}
+
+float getPauseAtZPos() {
+	return pauseZPos;
+}
+
 
 bool isEmpty() {
 	return command_buffer.isEmpty();
@@ -112,6 +139,7 @@ Timeout homing_timeout;
 Timeout tool_wait_timeout;
 
 void reset() {
+	pauseAtZPos(0.0);
 	command_buffer.reset();
 	mode = READY;
 }
@@ -129,7 +157,7 @@ bool querySlaveCmd(uint8_t cmd, uint8_t *result) {
 		InPacket& in = tool::getInPacket();
 		out.reset();
 		out.append8(tool::getCurrentToolheadIndex());
-		out.append8(SLAVE_CMD_GET_TOOL_STATUS);
+		out.append8(cmd);
 		tool::startTransaction();
 
 		// WHILE: bounded by timeout in runToolSlice
@@ -183,6 +211,14 @@ void runCommandSlice() {
 		}
 	}
 	if (paused) { return; }
+		
+	//If PauseAtZPos is enabled, pause when we reach zpos
+	//0.005 because of float point rounding errors, we want
+	//to make sure we stop at the correct place
+	if (( pauseZPos != 0.0) && ( ! isPaused() ) &&
+	    (((float)steppers::getPosition()[2] / getRevsPerMM()) >= (pauseZPos - 0.005) ))
+		pause(true);
+
 	if (mode == HOMING) {
 		if (!steppers::isRunning()) {
 			mode = READY;
@@ -215,6 +251,7 @@ void runCommandSlice() {
 		}
 	}
 	if (mode == READY) {
+		oldz=z;
 		// process next command on the queue.
 		if (command_buffer.getLength() > 0) {
 			uint8_t command = command_buffer[0];
@@ -226,9 +263,10 @@ void runCommandSlice() {
 					mode = MOVING;
 					int32_t x = pop32();
 					int32_t y = pop32();
-					int32_t z = pop32();
+					z = pop32();
 					int32_t dda = pop32();
 					steppers::setTarget(Point(x,y,z),dda);
+					
 				}
 			} else if (command == HOST_CMD_QUEUE_POINT_EXT) {
 				recentCommandTime = recentCommandClock;
@@ -238,7 +276,7 @@ void runCommandSlice() {
 					mode = MOVING;
 					int32_t x = pop32();
 					int32_t y = pop32();
-					int32_t z = pop32();
+					z = pop32();
 					int32_t a = pop32();
 					int32_t b = pop32();
 					int32_t dda = pop32();
@@ -252,7 +290,7 @@ void runCommandSlice() {
 					mode = MOVING;
 					int32_t x = pop32();
 					int32_t y = pop32();
-					int32_t z = pop32();
+					z = pop32();
 					int32_t a = pop32();
 					int32_t b = pop32();
 					int32_t us = pop32();
@@ -282,7 +320,7 @@ void runCommandSlice() {
 					command_buffer.pop(); // remove the command code
 					int32_t x = pop32();
 					int32_t y = pop32();
-					int32_t z = pop32();
+					z = pop32();
 					steppers::definePosition(Point(x,y,z));
 				}
 			} else if (command == HOST_CMD_SET_POSITION_EXT) {
@@ -291,7 +329,7 @@ void runCommandSlice() {
 					command_buffer.pop(); // remove the command code
 					int32_t x = pop32();
 					int32_t y = pop32();
-					int32_t z = pop32();
+					z = pop32();
 					int32_t a = pop32();
 					int32_t b = pop32();
 					steppers::definePosition(Point(x,y,z,a,b));
@@ -436,6 +474,10 @@ void runCommandSlice() {
 			} else {
 			}
 		}
+		
+		if (!paused && pauseOnZ && z!=oldz) {
+			paused=true;
+		}
 	}
 }
 
@@ -557,6 +599,14 @@ void updateMoodStatus() {
 	Motherboard::getBoard().getMoodLightController().displayStatus(mlStatus, percentHot);
 
 	lastMlStatus = mlStatus;
+}
+
+uint16_t getZ() {
+	return z;
+}
+
+uint16_t getoldZ() {
+	return oldz;
 }
 
 #endif

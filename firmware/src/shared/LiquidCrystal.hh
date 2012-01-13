@@ -90,10 +90,14 @@ public:
   void writeFloat(float value, uint8_t decimalPlaces);
 
   void writeString(char message[]);
+  
+  void writeBlankLine(uint8_t line);
 
   void writeFromPgmspace(const prog_uchar message[]);
 
   void command(uint8_t);
+  
+  uint8_t getDisplayWidth();
 
 private:
   void send(uint8_t, bool);
@@ -109,6 +113,8 @@ private:
   uint8_t _displayfunction;
   uint8_t _displaycontrol;
   uint8_t _displaymode;
+  uint8_t dispsize;
+  int row_offsets[4];
 
   uint8_t _initialized;
 
