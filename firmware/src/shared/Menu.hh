@@ -55,6 +55,10 @@ public:
 
 protected:
 
+				uint8_t	subItemIndex;
+				uint8_t firstSubItemIndex;
+				uint8_t lastSubItemIndex;
+				uint8_t lastSubIndex;
         uint8_t itemIndex;              ///< The currently selected item
         uint8_t lastDrawIndex;          ///< The index used to make the last draw
         uint8_t itemCount;              ///< Total number of items
@@ -66,10 +70,14 @@ protected:
         /// \param[in] index Index of the item to draw
         /// \param[in] LCD screen to draw onto
 	virtual void drawItem(uint8_t index, LiquidCrystal& lcd);
+	
+	virtual void drawItemSub(uint8_t index, uint8_t subIndex, LiquidCrystal& lcd);
 
         /// Handle selection of a menu item
         /// \param[in] index Index of the menu item that was selected
 	virtual void handleSelect(uint8_t index);
+	
+	virtual void handleSelectSub(uint8_t index, uint8_t subIndex);
 
         /// Handle the menu being cancelled. This should either remove the
         /// menu from the stack, or pop up a confirmation dialog to make sure
@@ -80,11 +88,6 @@ protected:
 /// Display a welcome splash screen, that removes itself when updated.
 class SplashScreen: public Screen {
 private:
-
-#ifndef VERSION
-#error "Version not defined! Please define the version number for this build."
-#endif
-
 
 
 public:
@@ -186,6 +189,7 @@ private:
 
 public:
  	bool autoPause;
+ 	bool freeMove;
 
 	micros_t getUpdateRate() {return 50L * 1000L;}
 
@@ -215,12 +219,12 @@ public:
 class CancelBuildMenu: public Menu {
 public:
 	CancelBuildMenu();
-
 	void resetState();
+	
 protected:
-	void drawItem(uint8_t index, LiquidCrystal& lcd);
-
-	void handleSelect(uint8_t index);
+	void drawItemSub(uint8_t index, uint8_t subIndex, LiquidCrystal& lcd);
+	void handleSelectSub(uint8_t index, uint8_t subIndex);
+	
 private:
 	PauseMode	        pauseMode;
 	bool		          pauseDisabled;
@@ -535,6 +539,69 @@ private:
 	NYI notyetimplemented;
 };
 
+class AdvanceABPMode: public Screen {
+private:
+	bool abpForwarding;
+
+public:
+	micros_t getUpdateRate() {return 50L * 1000L;}
+
+	void update(LiquidCrystal& lcd, bool forceRedraw);
+
+	void reset();
+
+        void notifyButtonPressed(ButtonArray::ButtonName button);
+};
+
+class CalibrateMode: public Screen {
+private:
+	enum calibrateState {
+		CS_NONE,
+		CS_START1,	//Disable steppers
+		CS_START2,	//Disable steppers
+		CS_PROMPT_MOVE,	//Prompt user to move build platform
+		CS_HOME_Z,
+		CS_HOME_Z_WAIT,
+		CS_HOME_Y,
+		CS_HOME_Y_WAIT,
+		CS_HOME_X,
+		CS_HOME_X_WAIT,
+		CS_PROMPT_CALIBRATED
+	};
+
+	enum calibrateState calibrationState, lastCalibrationState;
+
+public:
+	micros_t getUpdateRate() {return 50L * 1000L;}
+
+	void update(LiquidCrystal& lcd, bool forceRedraw);
+
+	void reset();
+
+        void notifyButtonPressed(ButtonArray::ButtonName button);
+};
+
+class HomeOffsetsMode: public Screen {
+private:
+	enum homeOffState {
+		HOS_NONE,
+		HOS_OFFSET_X,
+		HOS_OFFSET_Y,
+		HOS_OFFSET_Z,
+	};
+
+	enum homeOffState homeOffsetState, lastHomeOffsetState;
+
+public:
+	micros_t getUpdateRate() {return 50L * 1000L;}
+
+	void update(LiquidCrystal& lcd, bool forceRedraw);
+
+	void reset();
+
+        void notifyButtonPressed(ButtonArray::ButtonName button);
+};
+
 
 class MainMenu: public Menu {
 public:
@@ -552,6 +619,9 @@ private:
 				PreheatMenu preheatMenu;
 				ExtruderMode extruderMenu;
 				SteppersMenu steppersMenu;
+				AdvanceABPMode advanceABPMode;
+				CalibrateMode calibrateMode;
+				HomeOffsetsMode homeOffsetsMode;
 				SetupMode setup;
 				
 };

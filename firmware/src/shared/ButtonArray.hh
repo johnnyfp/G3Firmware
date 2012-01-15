@@ -33,7 +33,8 @@ public:
                 XMINUS          = 6,
                 XPLUS           = 7,
                 CANCEL          = 11,
-                OK              = 12
+                OK              = 12,
+                UNKNOWN					= 99
         };
 
         void init();
