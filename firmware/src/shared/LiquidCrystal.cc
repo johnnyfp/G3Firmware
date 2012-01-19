@@ -288,11 +288,40 @@ void LiquidCrystal::writeInt(uint16_t value, uint8_t digits) {
 	}
 }
 
+void LiquidCrystal::writeLong(uint32_t value, uint8_t digits) {
+
+	uint32_t currentDigit;
+	uint32_t nextDigit;
+
+	switch (digits) {
+	case 1:		currentDigit = 10;		break;
+	case 2:		currentDigit = 100;		break;
+	case 3:		currentDigit = 1000;	break;
+	case 4:		currentDigit = 10000;	break;
+	case 5:		currentDigit = 100000;	break;
+	case 6:		currentDigit = 1000000;	break;
+	case 7:		currentDigit = 10000000;	break;
+	case 8:		currentDigit = 100000000;	break;
+	case 9:		currentDigit = 1000000000;	break;
+	default: 	return;
+	}
+
+	for (uint8_t i = 0; i < digits; i++) {
+		nextDigit = currentDigit/10;
+		write((value%currentDigit)/nextDigit+'0');
+		currentDigit = nextDigit;
+	}
+}
+
 
 //From: http://www.arduino.cc/playground/Code/PrintFloats
 //tim [at] growdown [dot] com   Ammended to write a float to lcd
 
 void LiquidCrystal::writeFloat(float value, uint8_t decimalPlaces) {
+	LiquidCrystal::writeFloat(value,decimalPlaces,0);
+}
+
+void LiquidCrystal::writeFloat(float value, uint8_t decimalPlaces,uint8_t lpad) {
 	// this is used to cast digits 
 	int digit;
 	float tens = 0.1;
@@ -325,7 +354,13 @@ void LiquidCrystal::writeFloat(float value, uint8_t decimalPlaces) {
 	// write out the negative if needed
 	if (value < 0) write('-');
 
-	if (tenscount == 0) write('0');
+	if (lpad>0) {
+		for (i=0;i<lpad-tenscount;i++) {
+			write('0');
+		}
+	} else {
+		if (tenscount == 0) write('0');
+	}
 
 	for (i=0; i< tenscount; i++) {
 		digit = (int) (tempfloat/tens);

@@ -68,6 +68,8 @@ void doUpdate();
 micros_t getUpdateRate();
 
 MoodLightController moodLightController();
+
+LiquidCrystal& getLcd();
 }
 
 #endif

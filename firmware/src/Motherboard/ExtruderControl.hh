@@ -34,5 +34,8 @@ enum extruderCommandType {
 
 bool extruderControl(uint8_t command, enum extruderCommandType cmdType,
 		     OutPacket& responsePacket, uint16_t val);
+		     
+bool extruderControl(uint8_t command, enum extruderCommandType cmdType,
+		     OutPacket& responsePacket, uint16_t val, uint8_t append[]);
 
 #endif // EXTRUDERCONTROL_HH_

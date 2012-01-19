@@ -308,7 +308,8 @@ protected:
 
 private:
         /// Static instances of our menus
-        MonitorMode monitorMode;
+        ExtruPID monitorMode;
+        //MonitorMode monitorMode;
         SDMenu sdMenu;
         JogMode jogger;
 				PreheatMenu preheatMenu;

@@ -48,6 +48,10 @@ void pushScreen(Screen* newScreen) {
         board->pushScreen(newScreen);
 }
 
+LiquidCrystal& getLcd() {
+	return *lcd;
+}
+
 void popScreen() {
         board->popScreen();
 }

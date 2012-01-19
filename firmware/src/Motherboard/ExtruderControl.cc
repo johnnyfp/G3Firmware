@@ -18,16 +18,22 @@
  */
 
 #include "ExtruderControl.hh"
+#include "LiquidCrystal.hh"
 
 
 #define HOST_TOOL_RESPONSE_TIMEOUT_MS 50
 
 
+bool extruderControl(uint8_t command, enum extruderCommandType cmdType,
+		     OutPacket& responsePacket, uint16_t val) {
+		     	return extruderControl(command, cmdType,responsePacket, val,0);
+}
+
 /// Send a packet to the extruder.  If cmdType == EXTDR_CMD_SET, then "val" should
 /// contain the value to be written otherwise val is ignored.
 /// responsePacket is filled with the returned value
 bool extruderControl(uint8_t command, enum extruderCommandType cmdType,
-		     OutPacket& responsePacket, uint16_t val) {
+		     OutPacket& responsePacket, uint16_t val,uint8_t append[]) {
 
 	Timeout acquire_lock_timeout;
 	acquire_lock_timeout.start(HOST_TOOL_RESPONSE_TIMEOUT_MS);
@@ -45,8 +51,13 @@ bool extruderControl(uint8_t command, enum extruderCommandType cmdType,
 	// second is the
 	out.append8(0);
 	out.append8(command);
-	if ( cmdType == EXTDR_CMD_SET )	  out.append16(val);	
+	if ( cmdType == EXTDR_CMD_SET )	  out.append16((uint16_t)val);	
  	if ( cmdType == EXTDR_CMD_SET8 )	out.append8((uint8_t)val);	
+ 	uint8_t* ptr = append;
+	while (*ptr != 0) {
+		out.append8((uint8_t)*ptr);
+		ptr++;
+	}
 
 	// Timeouts are handled inside the toolslice code; there's no need
 	// to check for timeouts on this loop.

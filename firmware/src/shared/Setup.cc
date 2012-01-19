@@ -14,7 +14,7 @@
 #include <util/delay.h>
 #include <stdlib.h>
 #include "SDCard.hh"
-#include "EepromMap.hh"
+#include "SharedEepromMap.hh"
 #include "Eeprom.hh"
 #include <avr/eeprom.h>
 #include "ExtruderControl.hh"
@@ -184,7 +184,7 @@ void DisplaySetupMode::notifyButtonPressed(ButtonArray::ButtonName button) {
 	switch (button) {
 
 	case ButtonArray::OK:
-		eeprom_write_byte((uint8_t *)eeprom::DISPLAY_SIZE, (uint8_t)selSize);
+		eeprom_write_byte((uint8_t *)mbeeprom::DISPLAY_SIZE, (uint8_t)selSize);
 		resetRequired=true;
 		break;
 	case ButtonArray::ZMINUS:
@@ -202,7 +202,7 @@ void DisplaySetupMode::notifyButtonPressed(ButtonArray::ButtonName button) {
 }
 
 void DisplaySetupMode::reset() {
-	initSize=eeprom::getEeprom8(eeprom::DISPLAY_SIZE,16);
+	initSize=eeprom::getEeprom8(mbeeprom::DISPLAY_SIZE,16);
   selSize=initSize;
   resetRequired=false;
 }
@@ -319,7 +319,7 @@ void CalibrateMode::update(LiquidCrystal& lcd, bool forceRedraw) {
 			if ( ! steppers::isHoming() ) {
 				//Record current X, Y, Z, A, B co-ordinates to the motherboard
 				for (uint8_t i = 0; i < STEPPER_COUNT; i++) {
-					uint16_t offset = eeprom::AXIS_HOME_POSITIONS + 4*i;
+					uint16_t offset = mbeeprom::AXIS_HOME_POSITIONS + 4*i;
 					uint32_t position = steppers::getPosition()[i];
 					cli();
 					eeprom_write_block(&position, (void*) offset, 4);
@@ -368,7 +368,7 @@ void HomeOffsetsMode::reset() {
 	homePosition = steppers::getPosition();
 
 	for (uint8_t i = 0; i < STEPPER_COUNT; i++) {
-		uint16_t offset = eeprom::AXIS_HOME_POSITIONS + 4*i;
+		uint16_t offset = mbeeprom::AXIS_HOME_POSITIONS + 4*i;
 		cli();
 		eeprom_read_block(&(homePosition[i]), (void*) offset, 4);
 		sei();
@@ -431,7 +431,7 @@ void HomeOffsetsMode::notifyButtonPressed(ButtonArray::ButtonName button) {
 	if (( homeOffsetState == HOS_OFFSET_Z ) && (button == ButtonArray::OK )) {
 		//Write the new home positions
 		for (uint8_t i = 0; i < STEPPER_COUNT; i++) {
-			uint16_t offset = eeprom::AXIS_HOME_POSITIONS + 4*i;
+			uint16_t offset = mbeeprom::AXIS_HOME_POSITIONS + 4*i;
 			uint32_t position = homePosition[i];
 			cli();
 			eeprom_write_block(&position, (void*) offset, 4);
@@ -524,7 +524,7 @@ void MoodLightMode::update(LiquidCrystal& lcd, bool forceRedraw) {
 	}
 
  	//Redraw tool info
-	uint8_t scriptId = eeprom_read_byte((uint8_t *)eeprom::MOOD_LIGHT_SCRIPT);
+	uint8_t scriptId = eeprom_read_byte((uint8_t *)mbeeprom::MOOD_LIGHT_SCRIPT);
 
 	switch (updatePhase) {
 	case 0:
@@ -557,14 +557,14 @@ void MoodLightMode::notifyButtonPressed(ButtonArray::ButtonName button) {
 	switch (button) {
         	case ButtonArray::OK:
 			//Change the script to the next script id
-			scriptId = eeprom_read_byte((uint8_t *)eeprom::MOOD_LIGHT_SCRIPT);
+			scriptId = eeprom_read_byte((uint8_t *)mbeeprom::MOOD_LIGHT_SCRIPT);
 			scriptId = interface::moodLightController().nextScriptId(scriptId);
-			eeprom_write_byte((uint8_t *)eeprom::MOOD_LIGHT_SCRIPT, scriptId);
+			eeprom_write_byte((uint8_t *)mbeeprom::MOOD_LIGHT_SCRIPT, scriptId);
 			interface::moodLightController().playScript(scriptId);
 			break;
 
         	case ButtonArray::ZERO:
-			scriptId = eeprom_read_byte((uint8_t *)eeprom::MOOD_LIGHT_SCRIPT);
+			scriptId = eeprom_read_byte((uint8_t *)mbeeprom::MOOD_LIGHT_SCRIPT);
 			if ( scriptId == 1 )
 			{
 				//Set RGB Values
@@ -592,9 +592,9 @@ void MoodLightSetRGBScreen::reset() {
 	inputMode = 0;	//Red
 	redrawScreen = false;
 
-	red   = eeprom::getEeprom8(eeprom::MOOD_LIGHT_CUSTOM_RED,   255);;
-	green = eeprom::getEeprom8(eeprom::MOOD_LIGHT_CUSTOM_GREEN, 255);;
-	blue  = eeprom::getEeprom8(eeprom::MOOD_LIGHT_CUSTOM_BLUE,  255);;
+	red   = eeprom::getEeprom8(mbeeprom::MOOD_LIGHT_CUSTOM_RED,   255);;
+	green = eeprom::getEeprom8(mbeeprom::MOOD_LIGHT_CUSTOM_GREEN, 255);;
+	blue  = eeprom::getEeprom8(mbeeprom::MOOD_LIGHT_CUSTOM_BLUE,  255);;
 }
 
 void MoodLightSetRGBScreen::update(LiquidCrystal& lcd, bool forceRedraw) {
@@ -641,9 +641,9 @@ void MoodLightSetRGBScreen::notifyButtonPressed(ButtonArray::ButtonName button) 
 			inputMode ++;
 			redrawScreen = true;
 		} else {
-			eeprom_write_byte((uint8_t*)eeprom::MOOD_LIGHT_CUSTOM_RED,  red);
-			eeprom_write_byte((uint8_t*)eeprom::MOOD_LIGHT_CUSTOM_GREEN,green);
-			eeprom_write_byte((uint8_t*)eeprom::MOOD_LIGHT_CUSTOM_BLUE, blue);
+			eeprom_write_byte((uint8_t*)mbeeprom::MOOD_LIGHT_CUSTOM_RED,  red);
+			eeprom_write_byte((uint8_t*)mbeeprom::MOOD_LIGHT_CUSTOM_GREEN,green);
+			eeprom_write_byte((uint8_t*)mbeeprom::MOOD_LIGHT_CUSTOM_BLUE, blue);
 
 			//Set the color
 			interface::moodLightController().playScript(1);
@@ -687,7 +687,7 @@ void TestEndStopsMode::update(LiquidCrystal& lcd, bool forceRedraw) {
 	const static PROGMEM prog_uchar strmin[]   = "Min";
 	const static PROGMEM prog_uchar strmax[]   = "Max";
 	
-	uint8_t minmax=eeprom::getEeprom8(eeprom::AXIS_HOME_MINMAX, 0b00000001);
+	uint8_t minmax=eeprom::getEeprom8(mbeeprom::AXIS_HOME_MINMAX, 0b00000001);
 	
 	if (forceRedraw) {
 		lcd.clear();
@@ -911,6 +911,7 @@ void SetupMode::handleSelect(uint8_t index) {
 			break;
 		case 6:
 			interface::pushScreen(&mbPrefMenu);
+			break;
 		case 7:
 			interface::pushScreen(&notyetimplemented);
 			break;

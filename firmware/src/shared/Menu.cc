@@ -16,7 +16,7 @@
 #include <util/delay.h>
 #include <stdlib.h>
 #include "SDCard.hh"
-#include "EepromMap.hh"
+#include "SharedEepromMap.hh"
 #include "Eeprom.hh"
 #include <avr/eeprom.h>
 #include "ExtruderControl.hh"
@@ -35,8 +35,8 @@ bool abpForwarding,fanOn,toggle =false;
 Point pausedPosition;
 
 float getRevsPerMM(){
-	uint16_t whole = eeprom::getEeprom16(eeprom::ZAXIS_MM_PER_TURN_W, 200);
-	uint16_t frac  = eeprom::getEeprom16(eeprom::ZAXIS_MM_PER_TURN_P, 0);
+	uint16_t whole = eeprom::getEeprom16(mbeeprom::ZAXIS_MM_PER_TURN_W, 200);
+	uint16_t frac  = eeprom::getEeprom16(mbeeprom::ZAXIS_MM_PER_TURN_P, 0);
 	return ((float)whole+((float)frac/10000));	
 }
 
@@ -231,7 +231,7 @@ UserViewMenu::UserViewMenu() {
 }
 
 void UserViewMenu::resetState() {
-        uint8_t jogModeSettings = eeprom::getEeprom8(eeprom::JOG_MODE_SETTINGS, 0);
+        uint8_t jogModeSettings = eeprom::getEeprom8(mbeeprom::JOG_MODE_SETTINGS, 0);
 
 	if ( jogModeSettings & 0x01 )	itemIndex = 3;
 	else				itemIndex = 2;
@@ -260,24 +260,24 @@ void UserViewMenu::drawItem(uint8_t index, LiquidCrystal& lcd) {
 }
 
 void UserViewMenu::handleSelect(uint8_t index) {
-	uint8_t jogModeSettings = eeprom::getEeprom8(eeprom::JOG_MODE_SETTINGS, 0);
+	uint8_t jogModeSettings = eeprom::getEeprom8(mbeeprom::JOG_MODE_SETTINGS, 0);
 
 	switch (index) {
 	case 2:
 		// Model View
-		eeprom_write_byte((uint8_t *)eeprom::JOG_MODE_SETTINGS, (jogModeSettings & (uint8_t)0xFE));
+		eeprom_write_byte((uint8_t *)mbeeprom::JOG_MODE_SETTINGS, (jogModeSettings & (uint8_t)0xFE));
 		interface::popScreen();
 		break;
 	case 3:
 		// User View
-		eeprom_write_byte((uint8_t *)eeprom::JOG_MODE_SETTINGS, (jogModeSettings | (uint8_t)0x01));
+		eeprom_write_byte((uint8_t *)mbeeprom::JOG_MODE_SETTINGS, (jogModeSettings | (uint8_t)0x01));
                 interface::popScreen();
 		break;
 	}
 }
 
 void JogMode::reset() {
-	uint8_t jogModeSettings = eeprom::getEeprom8(eeprom::JOG_MODE_SETTINGS, 0);
+	uint8_t jogModeSettings = eeprom::getEeprom8(mbeeprom::JOG_MODE_SETTINGS, 0);
 
 	jogDistance = (enum distance_t)((jogModeSettings >> 1 ) & 0x07);
 	if ( jogDistance > DISTANCE_CONT ) jogDistance = DISTANCE_SHORT;
@@ -302,7 +302,7 @@ void JogMode::update(LiquidCrystal& lcd, bool forceRedraw) {
 	const static PROGMEM prog_uchar distanceLong[] = "LONG";
 	const static PROGMEM prog_uchar distanceCont[] = "CONT";
 
-	if ( userViewModeChanged ) userViewMode = eeprom::getEeprom8(eeprom::JOG_MODE_SETTINGS, 0) & 0x01;
+	if ( userViewModeChanged ) userViewMode = eeprom::getEeprom8(mbeeprom::JOG_MODE_SETTINGS, 0) & 0x01;
 
 	if (forceRedraw || distanceChanged || userViewModeChanged) {
 		lcd.clear();
@@ -418,7 +418,7 @@ void JogMode::notifyButtonPressed(ButtonArray::ButtonName button) {
 				break;
 		}
 		distanceChanged = true;
-		eeprom_write_byte((uint8_t *)eeprom::JOG_MODE_SETTINGS, userViewMode | (jogDistance << 1));
+		eeprom_write_byte((uint8_t *)mbeeprom::JOG_MODE_SETTINGS, userViewMode | (jogDistance << 1));
 		break;
         case ButtonArray::YMINUS:
         case ButtonArray::ZMINUS:
@@ -439,7 +439,7 @@ void JogMode::notifyButtonPressed(ButtonArray::ButtonName button) {
 }
 
 void ExtruderMode::reset() {
-	extrudeSeconds = (enum extrudeSeconds)eeprom::getEeprom8(eeprom::EXTRUDE_DURATION, 1);
+	extrudeSeconds = (enum extrudeSeconds)eeprom::getEeprom8(mbeeprom::EXTRUDE_DURATION, 1);
 	updatePhase = 0;
 	timeChanged = false;
 	lastDirection = 1;
@@ -541,7 +541,7 @@ void ExtruderMode::extrude(seconds_t seconds, bool overrideTempCheck) {
 
 	Point position = steppers::getPosition();
 
-	float rpm = (float)eeprom::getEeprom8(eeprom::EXTRUDE_RPM, 19) / 10.0;
+	float rpm = (float)eeprom::getEeprom8(mbeeprom::EXTRUDE_RPM, 19) / 10.0;
 
 	//60 * 1000000 = # uS in a minute
 	//200 * 8 = 200 steps per revolution * 1/8 stepping
@@ -595,7 +595,7 @@ void ExtruderMode::notifyButtonPressed(ButtonArray::ButtonName button) {
 					break;
 			}
 
-			eeprom_write_byte((uint8_t *)eeprom::EXTRUDE_DURATION, (uint8_t)extrudeSeconds);
+			eeprom_write_byte((uint8_t *)mbeeprom::EXTRUDE_DURATION, (uint8_t)extrudeSeconds);
 
 			//If we're already extruding, change the time running
 			if (steppers::isRunning())
@@ -674,7 +674,7 @@ void ExtruderTooColdMenu::handleSelect(uint8_t index) {
 }
 
 void ExtruderSetRpmScreen::reset() {
-	rpm = eeprom::getEeprom8(eeprom::EXTRUDE_RPM, 19);
+	rpm = eeprom::getEeprom8(mbeeprom::EXTRUDE_RPM, 19);
 }
 
 void ExtruderSetRpmScreen::update(LiquidCrystal& lcd, bool forceRedraw) {
@@ -705,7 +705,7 @@ void ExtruderSetRpmScreen::notifyButtonPressed(ButtonArray::ButtonName button) {
 			break;
 		case ButtonArray::ZERO:
 		case ButtonArray::OK:
-			eeprom_write_byte((uint8_t *)eeprom::EXTRUDE_RPM, rpm);
+			eeprom_write_byte((uint8_t *)mbeeprom::EXTRUDE_RPM, rpm);
 			interface::popScreen();
 			break;
 		case ButtonArray::ZPLUS:
@@ -1065,7 +1065,7 @@ void CancelBuildMenu::handleSelectSub(uint8_t index, uint8_t subIndex) {
 }
 
 MainMenu::MainMenu() {
-	itemCount = 10;
+	itemCount = 8;
 	reset();
 }
 
@@ -1320,7 +1320,7 @@ void SDMenu::handleSelect(uint8_t index) {
 }
 
 void Tool0TempSetScreen::reset() {
-	value = eeprom::getEeprom8(eeprom::TOOL0_TEMP, 220);
+	value = eeprom::getEeprom8(mbeeprom::TOOL0_TEMP, 220);
 }
 
 void Tool0TempSetScreen::update(LiquidCrystal& lcd, bool forceRedraw) {
@@ -1350,7 +1350,7 @@ void Tool0TempSetScreen::notifyButtonPressed(ButtonArray::ButtonName button) {
 		break;
         case ButtonArray::ZERO:
         case ButtonArray::OK:
-		eeprom_write_byte((uint8_t*)eeprom::TOOL0_TEMP,value);
+		eeprom_write_byte((uint8_t*)mbeeprom::TOOL0_TEMP,value);
 		interface::popScreen();
 		break;
         case ButtonArray::ZPLUS:
@@ -1385,7 +1385,7 @@ void Tool0TempSetScreen::notifyButtonPressed(ButtonArray::ButtonName button) {
 }
 
 void PlatformTempSetScreen::reset() {
-	value = eeprom::getEeprom8(eeprom::PLATFORM_TEMP, 110);;
+	value = eeprom::getEeprom8(mbeeprom::PLATFORM_TEMP, 110);;
 }
 
 void PlatformTempSetScreen::update(LiquidCrystal& lcd, bool forceRedraw) {
@@ -1415,7 +1415,7 @@ void PlatformTempSetScreen::notifyButtonPressed(ButtonArray::ButtonName button) 
 		break;
         case ButtonArray::ZERO:
         case ButtonArray::OK:
-		eeprom_write_byte((uint8_t*)eeprom::PLATFORM_TEMP,value);
+		eeprom_write_byte((uint8_t*)mbeeprom::PLATFORM_TEMP,value);
 		interface::popScreen();
 		break;
         case ButtonArray::ZPLUS:
@@ -1507,7 +1507,7 @@ void PreheatMenu::handleSelect(uint8_t index) {
 			if (tool0Temp > 0) {
 				extruderControl(SLAVE_CMD_SET_TEMP, EXTDR_CMD_SET, responsePacket, 0);
 			} else {
-				uint8_t value = eeprom::getEeprom8(eeprom::TOOL0_TEMP, 220);
+				uint8_t value = eeprom::getEeprom8(mbeeprom::TOOL0_TEMP, 220);
 				extruderControl(SLAVE_CMD_SET_TEMP, EXTDR_CMD_SET, responsePacket, (uint16_t)value);
 			}
 			fetchTargetTemps();
@@ -1518,7 +1518,7 @@ void PreheatMenu::handleSelect(uint8_t index) {
 			if (platformTemp > 0) {
 				extruderControl(SLAVE_CMD_SET_PLATFORM_TEMP, EXTDR_CMD_SET, responsePacket, 0);
 			} else {
-				uint8_t value = eeprom::getEeprom8(eeprom::PLATFORM_TEMP, 110);
+				uint8_t value = eeprom::getEeprom8(mbeeprom::PLATFORM_TEMP, 110);
 				extruderControl(SLAVE_CMD_SET_PLATFORM_TEMP, EXTDR_CMD_SET, responsePacket, value);
 			}
 			fetchTargetTemps();
@@ -1625,7 +1625,7 @@ void PauseMode::jog(ButtonArray::ButtonName direction) {
 			break;
 		case ButtonArray::OK:
 		case ButtonArray::ZERO:
-			float rpm = (float)eeprom::getEeprom8(eeprom::EXTRUDE_RPM, 19) / 10.0;
+			float rpm = (float)eeprom::getEeprom8(mbeeprom::EXTRUDE_RPM, 19) / 10.0;
       float mmperstep = getRevsPerMM();
 			//60 * 1000000 = # uS in a minute
 			//200 * 8 = 200 steps per revolution * 1/8 stepping
