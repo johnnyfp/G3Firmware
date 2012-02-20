@@ -46,6 +46,8 @@ protected:
 	virtual void handleSelect(uint8_t index);
 	
 	virtual void handleSelectSub(uint8_t index, uint8_t subIndex);
+	
+	virtual void handleButtonPressed(ButtonArray::ButtonName button,uint8_t index, uint8_t subIndex);
 
         /// Handle the menu being cancelled. This should either remove the
         /// menu from the stack, or pop up a confirmation dialog to make sure

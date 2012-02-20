@@ -28,8 +28,8 @@
 #include <avr/pgmspace.h>
 #include "Main.hh"
 #include "Errors.hh"
-#include "Eeprom.hh"
-#include "EepromMap.hh"
+#include "SharedEepromMap.hh"
+#include "eeprom.hh"
 
 namespace host {
 
@@ -260,7 +260,7 @@ inline void handlePlayback(const InPacket& from_host, OutPacket& to_host) {
 	}
 	buildName[MAX_FILE_LEN-1] = '\0';
 
-	uint8_t response = startBuildFromSD();
+	uint8_t response = startBuildFromSD(false);
 	to_host.append8(response);
 }
 
@@ -466,8 +466,10 @@ bool processQueryPacket(const InPacket& from_host, OutPacket& to_host) {
 			case HOST_CMD_ABORT: // equivalent at current time
 			case HOST_CMD_RESET:
 				// TODO: This is fishy.
+				command::addFilamentUsed();
 				if (currentState == HOST_STATE_BUILDING
-						|| currentState == HOST_STATE_BUILDING_FROM_SD) {
+						|| currentState == HOST_STATE_BUILDING_FROM_SD
+						|| currentState == HOST_STATE_ESTIMATING_FROM_SD) {
 					stopBuild();
 				}
 
@@ -535,7 +537,7 @@ char* getMachineName() {
 	// If the machine name hasn't been loaded, load it
 	if (machineName[0] == 0) {
 		for(uint8_t i = 0; i < MAX_MACHINE_NAME_LEN; i++) {
-			machineName[i] = eeprom::getEeprom8(eeprom::MACHINE_NAME+i, 0);
+			machineName[i] = eeprom::getEeprom8(mbeeprom::MACHINE_NAME+i, 0);
 		}
 	}
 
@@ -559,7 +561,8 @@ HostState getHostState() {
 	return currentState;
 }
 
-sdcard::SdErrorCode startBuildFromSD() {
+
+sdcard::SdErrorCode startBuildFromSD(bool estimateFirst) {
 	sdcard::SdErrorCode e;
 
 	// Attempt to start build
@@ -569,7 +572,9 @@ sdcard::SdErrorCode startBuildFromSD() {
 		return e;
 	}
 
-	currentState = HOST_STATE_BUILDING_FROM_SD;
+	if ( estimateFirst )	currentState = HOST_STATE_ESTIMATING_FROM_SD;
+	else			currentState = HOST_STATE_BUILDING_FROM_SD;
+
 
 	return e;
 }
@@ -579,10 +584,23 @@ void stopBuild() {
 	do_host_reset = true; // indicate reset after response has been sent
 }
 
+// Reset the current build, used for ATX power on reset
+void resetBuild() {
+	machineName[0] = 0;
+	buildName[0] = 0;
+	currentState = HOST_STATE_READY;
+}
+
+
 bool isBuildComplete() {
 	if (( command::isEmpty() ) && ( ! sdcard::playbackHasNext() ))	return true;
 	return false;
 }
+
+void setHostStateBuildingFromSD() {
+	if ( currentState == HOST_STATE_ESTIMATING_FROM_SD )	currentState = HOST_STATE_BUILDING_FROM_SD;
+}
+
 
 }
 

@@ -17,7 +17,8 @@
 
 #include "ThermistorTable.hh"
 #include "Configuration.hh"
-#include "EepromMap.hh"
+#include "SharedEepromMap.hh"
+#include "eeprom.hh"
 #include <avr/eeprom.h>
 #include <stdint.h>
 #include <avr/pgmspace.h>
@@ -78,10 +79,10 @@ inline Entry getEntry(int8_t entryIdx, int8_t which) {
 		// get from eeprom
 		uint16_t offset;
 		if (which == 0) {
-			offset = eeprom::THERM_TABLE_0 + eeprom::THERM_DATA_OFFSET;
+			offset = mbeeprom::THERM_TABLE_0 + mbeeprom::THERM_DATA_OFFSET;
 		}
 		else {
-			offset = eeprom::THERM_TABLE_1 + eeprom::THERM_DATA_OFFSET;
+			offset = mbeeprom::THERM_TABLE_1 + mbeeprom::THERM_DATA_OFFSET;
 		}
 		offset += sizeof(Entry) * entryIdx;
 		eeprom_read_block(&rv,(const void*)offset,sizeof(Entry));
@@ -136,8 +137,8 @@ bool isTableSet(uint16_t off) {
 
 
 void initThermistorTables() {
-	has_table[0] = isTableSet(eeprom::THERM_TABLE_0 + eeprom::THERM_DATA_OFFSET);
-	has_table[1] = isTableSet(eeprom::THERM_TABLE_1 + eeprom::THERM_DATA_OFFSET);
+	has_table[0] = isTableSet(mbeeprom::THERM_TABLE_0 + mbeeprom::THERM_DATA_OFFSET);
+	has_table[1] = isTableSet(mbeeprom::THERM_TABLE_1 + mbeeprom::THERM_DATA_OFFSET);
 }
 
 #endif

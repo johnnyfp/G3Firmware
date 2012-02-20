@@ -16,8 +16,8 @@
  */
 
 #include "StepperInterface.hh"
-#include "Eeprom.hh"
-#include "EepromMap.hh"
+#include "SharedEepromMap.hh"
+#include "eeprom.hh"
 #include "Configuration.hh"
 
 StepperInterface::StepperInterface(const Pin& dir,

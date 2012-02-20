@@ -1,8 +1,7 @@
 #include "Configuration.hh"
 #include "CoolingFan.hh"
-//#include "ExtruderMotor.hh"
-#include "Eeprom.hh"
-#include "EepromMap.hh"
+#include "SharedEepromMap.hh"
+#include "eeprom.hh"
 
 #ifdef IS_EXTRUDER_BOARD
 	#include "ExtruderBoard.hh"

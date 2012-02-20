@@ -4,10 +4,11 @@
 #include "Types.hh"
 #include "ButtonArray.hh"
 #include "LiquidCrystal.hh"
-
 #include "Screen.hh"
 #include "MenuClass.hh"
 #include "Setup.hh"
+#include "UtilsMenu.hh"
+#include "SDCard.hh"
 
 /// Display a welcome splash screen, that removes itself when updated.
 class SplashScreen: public Screen {
@@ -38,8 +39,8 @@ protected:
 class JogMode: public Screen {
 private:
 	enum distance_t {
-	  DISTANCE_SHORT = 0,
-	  DISTANCE_LONG,
+	  DISTANCE_0_1MM = 0,
+	  DISTANCE_1MM,
 	  DISTANCE_CONT,
 	};
 
@@ -68,7 +69,10 @@ private:
 	uint8_t updatePhase;
 	uint8_t lastItemIndex;
 	bool  dir;
+	bool  inDirectories;
 	bool	drawItemLockout;
+	bool  invalidate;
+	sdcard::SdErrorCode sdlasterror;
 public:
 	SDMenu();
 
@@ -76,6 +80,7 @@ public:
 
 	micros_t getUpdateRate() {return 500L * 1000L;}
 	void notifyButtonPressed(ButtonArray::ButtonName button);
+	/*void handleButtonPressed(ButtonArray::ButtonName button,uint8_t index, uint8_t subIndex);*/
 
 	void update(LiquidCrystal& lcd, bool forceRedraw);
 protected:
@@ -89,7 +94,31 @@ protected:
 
 	void handleSelect(uint8_t index);
 };
+/*
+class CardMenu: public Menu {
+private:
+	uint8_t updatePhase;
+	uint8_t lastItemIndex;
+	bool  dir;
+	bool  inDirectories;
+	bool	drawItemLockout;
+	bool  invalidate;
+	sdcardmanager::SdErrorCode sdlasterror;
+public:
+	CardMenu();
 
+	micros_t getUpdateRate() {return 500L * 1000L;}
+
+	void resetState();
+
+protected:
+	void drawItem(uint8_t index, LiquidCrystal& lcd);
+	void handleSelect(uint8_t index);
+	void handleButtonPressed(ButtonArray::ButtonName button,uint8_t index, uint8_t subIndex);
+	uint8_t countFiles();
+  bool getFilename(uint8_t index, char buffer[],uint8_t buffer_size);
+};
+*/
 class PauseMode: public Screen {
 private:
 	ButtonArray::ButtonName lastDirectionButtonPressed;
@@ -138,20 +167,44 @@ private:
 	PauseMode	        pauseMode;
 	bool		          pauseDisabled;
 	PauseAtZPosScreen	pauseAtZPosScreen;
-
+	bool			printAnotherEnabled;
 };
 
 class MonitorMode: public Screen {
 private:
 	CancelBuildMenu cancelBuildMenu;
 
-	uint8_t updatePhase;
-	uint8_t buildTimePhase;
+		enum UpdatePhase {
+		UPDATE_PHASE_FIRST = 0,
+		UPDATE_PHASE_TOOL_TEMP = UPDATE_PHASE_FIRST,
+		UPDATE_PHASE_TOOL_TEMP_SET_POINT,
+		UPDATE_PHASE_PLATFORM_TEMP,
+		UPDATE_PHASE_PLATFORM_SET_POINT,
+		UPDATE_PHASE_BUILD_PHASE_SCROLLER,
+		UPDATE_PHASE_LAST	//Not counted, just an end marker
+	};
+
+	enum BuildTimePhase {
+		BUILD_TIME_PHASE_FIRST = 0,
+		BUILD_TIME_PHASE_COMPLETED_PERCENT = BUILD_TIME_PHASE_FIRST,
+		BUILD_TIME_PHASE_ELAPSED_TIME,
+		BUILD_TIME_PHASE_TIME_LEFT,
+		BUILD_TIME_PHASE_ZPOS,
+		BUILD_TIME_PHASE_FILAMENT,
+		BUILD_TIME_PHASE_COPIES_PRINTED,
+		BUILD_TIME_PHASE_LAST	//Not counted, just an end marker
+	};
+
+	enum UpdatePhase updatePhase;
+	enum BuildTimePhase buildTimePhase, lastBuildTimePhase;
 	float   lastElapsedSeconds;
-	float   extruderStartSeconds; 
-	bool	  buildComplete;		//For solving floating point rounding issues
 	PauseMode pauseMode;
 	bool	pausePushLockout;
+  bool  buildCompleteBuzzPlayed;
+ 	int32_t buildDuration;
+	bool	overrideForceRedraw;
+	uint8_t	copiesPrinted;
+	bool	timeLeftDisplayed;
 
 
 public:
@@ -161,7 +214,7 @@ public:
 
 	void reset();
 
-        void notifyButtonPressed(ButtonArray::ButtonName button);
+  void notifyButtonPressed(ButtonArray::ButtonName button);
 };
 
 class Tool0TempSetScreen: public Screen {
@@ -210,17 +263,6 @@ private:
         /// Static instances of our menus
         Tool0TempSetScreen tool0TempSetScreen;
         PlatformTempSetScreen platTempSetScreen;
-};
-
-class ExtruderTooColdMenu: public Menu {
-public:
-	ExtruderTooColdMenu();
-	void resetState();
-	
-protected:
-	void drawItem(uint8_t index, LiquidCrystal& lcd);
-	void handleSelect(uint8_t index);
-	
 };
 
 class ExtruderSetRpmScreen: public Screen {
@@ -298,6 +340,19 @@ public:
         void notifyButtonPressed(ButtonArray::ButtonName button);
 };
 
+class CurrentPositionMode: public Screen {
+private:
+
+public:
+	micros_t getUpdateRate() {return 50L * 1000L;}
+
+	void update(LiquidCrystal& lcd, bool forceRedraw);
+
+	void reset();
+
+        void notifyButtonPressed(ButtonArray::ButtonName button);
+};
+
 class MainMenu: public Menu {
 public:
 	MainMenu();
@@ -305,18 +360,20 @@ public:
 protected:
 	void drawItem(uint8_t index, LiquidCrystal& lcd);
 	void handleSelect(uint8_t index);
+	void handleButtonPressed(ButtonArray::ButtonName button,uint8_t index, uint8_t subIndex);
 
 private:
         /// Static instances of our menus
-        ExtruPID monitorMode;
-        //MonitorMode monitorMode;
+        MonitorMode monitorMode;
         SDMenu sdMenu;
         JogMode jogger;
 				PreheatMenu preheatMenu;
 				ExtruderMode extruderMenu;
 				SteppersMenu steppersMenu;
 				AdvanceABPMode advanceABPMode;
-				SetupMode setup;
+				UtilsMenu utilsmenu;
+				CurrentPositionMode currentPositionMode;
+
 };
 
 #endif

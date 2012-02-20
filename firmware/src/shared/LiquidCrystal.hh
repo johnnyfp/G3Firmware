@@ -92,6 +92,8 @@ public:
   void writeFloat(float value, uint8_t decimalPlaces);
   
   void writeFloat(float value, uint8_t decimalPlaces,uint8_t lpad);
+  
+  void writeFixedPoint(int64_t value, uint8_t padding, uint8_t precision);
 
   void writeString(char message[]);
   

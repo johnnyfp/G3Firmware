@@ -23,8 +23,8 @@
 #include "Configuration.hh"
 #include "Steppers.hh"
 #include "Command.hh"
-#include "Eeprom.hh"
-#include "EepromMap.hh"
+#include "SharedEepromMap.hh"
+#include "eeprom.hh"
 
 /// Instantiate static motherboard instance
 Motherboard Motherboard::motherboard(PSU_PIN);
@@ -79,7 +79,7 @@ Motherboard::Motherboard(const Pin& psu_pin) :
 /// Reset the motherboard to its initial state.
 /// This only resets the board, and does not send a reset
 /// to any attached toolheads.
-void Motherboard::reset() {
+void Motherboard::reset(bool hard_reset) {
 	indicateError(0); // turn off blinker
 
 	// Init and turn on power supply

@@ -28,6 +28,9 @@ namespace command {
 /// commands.
 void reset();
 
+/// Adds the filament used in this build to eeprom
+void addFilamentUsed();
+
 /// Run the command thread slice.
 void runCommandSlice();
 
@@ -42,14 +45,29 @@ void pauseNextZ(bool pause);
 /// \return True if it is disabled, false if it is enabled.
 bool isPaused();
 
-/// \Pause at >= a Z Position provded in mm
+/// \Pause at >= a Z Position provded in steps
 /// 0 cancels pauseAtZPos
-void pauseAtZPos(float zpos);
+void pauseAtZPos(int32_t zpos);
 
 /// Get the current pauseAtZPos position
 /// \return the z position set for pausing, otherwise 0
-float getPauseAtZPos();
+int32_t getPauseAtZPos();
 
+/// Returns the length of filament extruded (in steps)
+int64_t getFilamentLength();
+
+/// Returns the length of filament extruded (in steps) prior to the
+/// last time the filament was added to the filament count
+int64_t getLastFilamentLength();
+
+//Returns the number of seconds estimated
+int32_t estimateSeconds();
+
+//Set the estimation mode
+void setEstimation(bool on);
+
+//Build another copy
+void buildAnotherCopy();
 
 /// Check the remaining capacity of the command buffer
 /// \return Amount of space left in the buffer, in bytes

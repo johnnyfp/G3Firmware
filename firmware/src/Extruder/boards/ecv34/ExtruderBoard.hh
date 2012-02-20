@@ -25,7 +25,8 @@
 #include "HeatingElement.hh"
 #include "Heater.hh"
 #include "SoftwareServo.hh"
-#include "EepromMap.hh"
+#include "SharedEepromMap.hh"
+#include "eeprom.hh"
 #include "CoolingFan.hh"
 #include "MotorController.hh"
 

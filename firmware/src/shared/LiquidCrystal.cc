@@ -3,8 +3,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <util/delay.h>
-#include "EepromMap.hh"
-#include "Eeprom.hh"
+#include "SharedEepromMap.hh"
+#include "eeprom.hh"
 #include <avr/eeprom.h>
 
 // When the display powers up, it is configured as follows:
@@ -79,7 +79,7 @@ void LiquidCrystal::init(uint8_t fourbitmode, Pin rs, Pin rw, Pin enable,
   else 
     _displayfunction = LCD_8BITMODE | LCD_1LINE | LCD_5x8DOTS;
   
-  dispsize = eeprom::getEeprom16(eeprom::DISPLAY_SIZE,16);
+  dispsize = eeprom::getEeprom16(mbeeprom::DISPLAY_SIZE,16);
   row_offsets[0] = 0x00;
   row_offsets[1] = 0x40; 
   row_offsets[2] = dispsize;
@@ -384,6 +384,36 @@ void LiquidCrystal::writeFloat(float value, uint8_t decimalPlaces,uint8_t lpad) 
 		tempfloat = tempfloat - (float) digit; 
 	}
 }
+
+//Writes a fixed point number stored in padding.precision format
+//where numbers are padded with leading zeros to "padding", and
+//Displays "overflow" if the number doesn't fit within padding
+//Example:  writeFixedPoint(2000 00000, 5, 5) displays 02000.00000
+
+void LiquidCrystal::writeFixedPoint(int64_t value, uint8_t padding, uint8_t precision) {
+        const static PROGMEM prog_uchar overflow[]  = "overflow";
+
+	int64_t divisor = 1;
+	for (uint8_t i = 0; i < (padding + precision); i ++ )
+		divisor *= 10;
+	
+	if (( value / divisor ) > 0) {
+        	writeFromPgmspace(overflow);
+		return;
+	}
+
+	uint8_t i = 0;
+	do {
+		divisor /= 10;
+		if ( i == padding )	write('.');
+		write(((uint8_t)(value / divisor)) + '0');
+		value %= divisor;
+		i ++;	
+	}
+	while ( divisor > 1 );
+}
+
+
 
 void LiquidCrystal::writeString(char message[]) {
 	char* letter = message;

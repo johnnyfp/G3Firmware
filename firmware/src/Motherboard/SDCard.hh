@@ -38,24 +38,28 @@ namespace sdcard {
       SD_ERR_NO_ROOT          = 5,  ///< No root directory found
       SD_ERR_CARD_LOCKED      = 6,  ///< Card is locked, writing forbidden
       SD_ERR_FILE_NOT_FOUND   = 7,  ///< Could not find specific file
-      SD_ERR_GENERIC          = 8   ///< General error
+      SD_ERR_GENERIC          = 8,  ///< General error
+      SD_ERR_HOST_NR					= 9,  ///<Host not ready
+      SD_ERR_READING					= 10  ///<Error while reading the file
     } SdErrorCode;
 
     /// Reset the SD card subsystem.
     void reset();
-
+    
+		/// Change Directory
+		bool cd(const char* name);
 
     /// Start a directory scan.
     /// \return SD_SUCCESS if successful
     SdErrorCode directoryReset();
-
-
+    
     /// Get the next filename in a directory scan.
     /// \param[in] buffer Character buffer to store name in
     /// \param[in] bufsize Size of buffer
     /// \return SD_SUCCESS if successful
-    SdErrorCode directoryNextEntry(char* buffer, uint8_t bufsize);
+    SdErrorCode directoryNextEntry(char* buffer, uint8_t bufsize,uint8_t* fileLength = 0);
 
+		SdErrorCode directoryNextDirEntry(char* buffer, uint8_t bufsize,uint8_t* fileLength = 0);
 
     /// Begin capturing bufffered commands to a new file with the given filename.
     /// Returns an SD card error/success code.
@@ -99,6 +103,8 @@ namespace sdcard {
     /// \return The next byre in the file.
     uint8_t playbackNext();
 
+    /// Rewinds a play back to the beginning
+    void playbackRestart();
 
     /// Rewind the given number of bytes in the input stream.
     /// \param[in] bytes Number of bytes to rewind

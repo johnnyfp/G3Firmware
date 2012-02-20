@@ -1,14 +1,13 @@
 
 /* 
- * Copyright (c) 2006-2010 by Roland Riegel <feedback@roland-riegel.de>
+ * Copyright (c) 2006-2011 by Roland Riegel <feedback@roland-riegel.de>
  *
  * This file is free software; you can redistribute it and/or modify
  * it under the terms of either the GNU General Public License version 2
  * or the GNU Lesser General Public License version 2.1, both as
  * published by the Free Software Foundation.
  */
-
-#define __STDC_LIMIT_MACROS 1
+#define __STDC_LIMIT_MACROS 1 /*MB Changed*/
 
 #include "byteordering.h"
 #include "partition.h"
@@ -167,7 +166,7 @@ struct fat_file_struct
     struct fat_dir_entry_struct dir_entry;
     offset_t pos;
     cluster_t pos_cluster;
-#ifdef FAT_DELAY_DIRENTRY_UPDATE
+#ifdef FAT_DELAY_DIRENTRY_UPDATE /*MB Changed*/
     uint8_t needs_write;
 #endif
 };
@@ -309,7 +308,7 @@ void fat_close(struct fat_fs_struct* fs)
  * \ingroup fat_fs
  * Reads and parses the header of a FAT filesystem.
  *
- * \param[inout] fs The filesystem for which to parse the header.
+ * \param[in,out] fs The filesystem for which to parse the header.
  * \returns 0 on failure, 1 on success.
  */
 uint8_t fat_read_header(struct fat_fs_struct* fs)
@@ -331,17 +330,17 @@ uint8_t fat_read_header(struct fat_fs_struct* fs)
     if(!partition->device_read(partition_offset + 0x0b, buffer, sizeof(buffer)))
         return 0;
 
-    uint16_t bytes_per_sector = ltoh16(*((uint16_t*) &buffer[0x00]));
-    uint16_t reserved_sectors = ltoh16(*((uint16_t*) &buffer[0x03]));
+    uint16_t bytes_per_sector = read16(&buffer[0x00]);
+    uint16_t reserved_sectors = read16(&buffer[0x03]);
     uint8_t sectors_per_cluster = buffer[0x02];
     uint8_t fat_copies = buffer[0x05];
-    uint16_t max_root_entries = ltoh16(*((uint16_t*) &buffer[0x06]));
-    uint16_t sector_count_16 = ltoh16(*((uint16_t*) &buffer[0x08]));
-    uint16_t sectors_per_fat = ltoh16(*((uint16_t*) &buffer[0x0b]));
-    uint32_t sector_count = ltoh32(*((uint32_t*) &buffer[0x15]));
+    uint16_t max_root_entries = read16(&buffer[0x06]);
+    uint16_t sector_count_16 = read16(&buffer[0x08]);
+    uint16_t sectors_per_fat = read16(&buffer[0x0b]);
+    uint32_t sector_count = read32(&buffer[0x15]);
 #if FAT_FAT32_SUPPORT
-    uint32_t sectors_per_fat32 = ltoh32(*((uint32_t*) &buffer[0x19]));
-    uint32_t cluster_root_dir = ltoh32(*((uint32_t*) &buffer[0x21]));
+    uint32_t sectors_per_fat32 = read32(&buffer[0x19]);
+    uint32_t cluster_root_dir = read32(&buffer[0x21]);
 #endif
 
     if(sector_count == 0)
@@ -450,7 +449,7 @@ cluster_t fat_get_next_cluster(const struct fat_fs_struct* fs, cluster_t cluster
     {
         /* read appropriate fat entry */
         uint32_t fat_entry;
-        if(!fs->partition->device_read(fs->header.fat_offset + cluster_num * sizeof(fat_entry), (uint8_t*) &fat_entry, sizeof(fat_entry)))
+        if(!fs->partition->device_read(fs->header.fat_offset + (offset_t) cluster_num * sizeof(fat_entry), (uint8_t*) &fat_entry, sizeof(fat_entry)))
             return 0;
 
         /* determine next cluster from fat */
@@ -467,7 +466,7 @@ cluster_t fat_get_next_cluster(const struct fat_fs_struct* fs, cluster_t cluster
     {
         /* read appropriate fat entry */
         uint16_t fat_entry;
-        if(!fs->partition->device_read(fs->header.fat_offset + cluster_num * sizeof(fat_entry), (uint8_t*) &fat_entry, sizeof(fat_entry)))
+        if(!fs->partition->device_read(fs->header.fat_offset + (offset_t) cluster_num * sizeof(fat_entry), (uint8_t*) &fat_entry, sizeof(fat_entry)))
             return 0;
 
         /* determine next cluster from fat */
@@ -527,13 +526,13 @@ cluster_t fat_append_clusters(struct fat_fs_struct* fs, cluster_t cluster_num, c
 #if FAT_FAT32_SUPPORT
         if(is_fat32)
         {
-            if(!device_read(fat_offset + cluster_current * sizeof(fat_entry32), (uint8_t*) &fat_entry32, sizeof(fat_entry32)))
+            if(!device_read(fat_offset + (offset_t) cluster_current * sizeof(fat_entry32), (uint8_t*) &fat_entry32, sizeof(fat_entry32)))
                 return 0;
         }
         else
 #endif
         {
-            if(!device_read(fat_offset + cluster_current * sizeof(fat_entry16), (uint8_t*) &fat_entry16, sizeof(fat_entry16)))
+            if(!device_read(fat_offset + (offset_t) cluster_current * sizeof(fat_entry16), (uint8_t*) &fat_entry16, sizeof(fat_entry16)))
                 return 0;
         }
 
@@ -560,7 +559,7 @@ cluster_t fat_append_clusters(struct fat_fs_struct* fs, cluster_t cluster_num, c
             else
                 fat_entry32 = htol32(cluster_next);
 
-            if(!device_write(fat_offset + cluster_current * sizeof(fat_entry32), (uint8_t*) &fat_entry32, sizeof(fat_entry32)))
+            if(!device_write(fat_offset + (offset_t) cluster_current * sizeof(fat_entry32), (uint8_t*) &fat_entry32, sizeof(fat_entry32)))
                 break;
         }
         else
@@ -586,7 +585,7 @@ cluster_t fat_append_clusters(struct fat_fs_struct* fs, cluster_t cluster_num, c
             else
                 fat_entry16 = htol16((uint16_t) cluster_next);
 
-            if(!device_write(fat_offset + cluster_current * sizeof(fat_entry16), (uint8_t*) &fat_entry16, sizeof(fat_entry16)))
+            if(!device_write(fat_offset + (offset_t) cluster_current * sizeof(fat_entry16), (uint8_t*) &fat_entry16, sizeof(fat_entry16)))
                 break;
         }
 
@@ -609,7 +608,7 @@ cluster_t fat_append_clusters(struct fat_fs_struct* fs, cluster_t cluster_num, c
             {
                 fat_entry32 = htol32(cluster_next);
 
-                if(!device_write(fat_offset + cluster_num * sizeof(fat_entry32), (uint8_t*) &fat_entry32, sizeof(fat_entry32)))
+                if(!device_write(fat_offset + (offset_t) cluster_num * sizeof(fat_entry32), (uint8_t*) &fat_entry32, sizeof(fat_entry32)))
                     break;
             }
             else
@@ -617,7 +616,7 @@ cluster_t fat_append_clusters(struct fat_fs_struct* fs, cluster_t cluster_num, c
             {
                 fat_entry16 = htol16((uint16_t) cluster_next);
 
-                if(!device_write(fat_offset + cluster_num * sizeof(fat_entry16), (uint8_t*) &fat_entry16, sizeof(fat_entry16)))
+                if(!device_write(fat_offset + (offset_t) cluster_num * sizeof(fat_entry16), (uint8_t*) &fat_entry16, sizeof(fat_entry16)))
                     break;
             }
         }
@@ -665,7 +664,7 @@ uint8_t fat_free_clusters(struct fat_fs_struct* fs, cluster_t cluster_num)
         uint32_t fat_entry;
         while(cluster_num)
         {
-            if(!fs->partition->device_read(fat_offset + cluster_num * sizeof(fat_entry), (uint8_t*) &fat_entry, sizeof(fat_entry)))
+            if(!fs->partition->device_read(fat_offset + (offset_t) cluster_num * sizeof(fat_entry), (uint8_t*) &fat_entry, sizeof(fat_entry)))
                 return 0;
 
             /* get next cluster of current cluster before freeing current cluster */
@@ -690,7 +689,7 @@ uint8_t fat_free_clusters(struct fat_fs_struct* fs, cluster_t cluster_num)
 
             /* free cluster */
             fat_entry = HTOL32(FAT32_CLUSTER_FREE);
-            fs->partition->device_write(fat_offset + cluster_num * sizeof(fat_entry), (uint8_t*) &fat_entry, sizeof(fat_entry));
+            fs->partition->device_write(fat_offset + (offset_t) cluster_num * sizeof(fat_entry), (uint8_t*) &fat_entry, sizeof(fat_entry));
 
             /* We continue in any case here, even if freeing the cluster failed.
              * The cluster is lost, but maybe we can still free up some later ones.
@@ -705,7 +704,7 @@ uint8_t fat_free_clusters(struct fat_fs_struct* fs, cluster_t cluster_num)
         uint16_t fat_entry;
         while(cluster_num)
         {
-            if(!fs->partition->device_read(fat_offset + cluster_num * sizeof(fat_entry), (uint8_t*) &fat_entry, sizeof(fat_entry)))
+            if(!fs->partition->device_read(fat_offset + (offset_t) cluster_num * sizeof(fat_entry), (uint8_t*) &fat_entry, sizeof(fat_entry)))
                 return 0;
 
             /* get next cluster of current cluster before freeing current cluster */
@@ -724,7 +723,7 @@ uint8_t fat_free_clusters(struct fat_fs_struct* fs, cluster_t cluster_num)
 
             /* free cluster */
             fat_entry = HTOL16(FAT16_CLUSTER_FREE);
-            fs->partition->device_write(fat_offset + cluster_num * sizeof(fat_entry), (uint8_t*) &fat_entry, sizeof(fat_entry));
+            fs->partition->device_write(fat_offset + (offset_t) cluster_num * sizeof(fat_entry), (uint8_t*) &fat_entry, sizeof(fat_entry));
 
             /* We continue in any case here, even if freeing the cluster failed.
              * The cluster is lost, but maybe we can still free up some later ones.
@@ -764,14 +763,14 @@ uint8_t fat_terminate_clusters(struct fat_fs_struct* fs, cluster_t cluster_num)
     if(fs->partition->type == PARTITION_TYPE_FAT32)
     {
         uint32_t fat_entry = HTOL32(FAT32_CLUSTER_LAST_MAX);
-        if(!fs->partition->device_write(fs->header.fat_offset + cluster_num * sizeof(fat_entry), (uint8_t*) &fat_entry, sizeof(fat_entry)))
+        if(!fs->partition->device_write(fs->header.fat_offset + (offset_t) cluster_num * sizeof(fat_entry), (uint8_t*) &fat_entry, sizeof(fat_entry)))
             return 0;
     }
     else
 #endif
     {
         uint16_t fat_entry = HTOL16(FAT16_CLUSTER_LAST_MAX);
-        if(!fs->partition->device_write(fs->header.fat_offset + cluster_num * sizeof(fat_entry), (uint8_t*) &fat_entry, sizeof(fat_entry)))
+        if(!fs->partition->device_write(fs->header.fat_offset + (offset_t) cluster_num * sizeof(fat_entry), (uint8_t*) &fat_entry, sizeof(fat_entry)))
             return 0;
     }
 
@@ -954,7 +953,7 @@ struct fat_file_struct* fat_open_file(struct fat_fs_struct* fs, const struct fat
     fd->fs = fs;
     fd->pos = 0;
     fd->pos_cluster = dir_entry->cluster;
-#ifdef FAT_DELAY_DIRENTRY_UPDATE
+#ifdef FAT_DELAY_DIRENTRY_UPDATE /*MB Changed*/
 	fd->needs_write = 0;
 #endif
 
@@ -974,8 +973,8 @@ void fat_close_file(struct fat_file_struct* fd)
     {
 #if FAT_DELAY_DIRENTRY_UPDATE
         /* write directory entry */
-        if (fd->needs_write == 1)
-			fat_write_dir_entry(fd->fs, &fd->dir_entry);
+        if (fd->needs_write == 1) /*MB Changed*/
+        fat_write_dir_entry(fd->fs, &fd->dir_entry);
 #endif
 
 #if USE_DYNAMIC_MEMORY
@@ -1090,7 +1089,7 @@ intptr_t fat_read_file(struct fat_file_struct* fd, uint8_t* buffer, uintptr_t bu
  * \param[in] fd The file handle of the file to which to write.
  * \param[in] buffer The buffer from which to read the data to be written.
  * \param[in] buffer_len The amount of data to write.
- * \returns The number of bytes written, 0 on disk full, or -1 on failure.
+ * \returns The number of bytes written (0 or something less than \c buffer_len on disk full) or -1 on failure.
  * \see fat_read_file
  */
 intptr_t fat_write_file(struct fat_file_struct* fd, const uint8_t* buffer, uintptr_t buffer_len)
@@ -1118,7 +1117,7 @@ intptr_t fat_write_file(struct fat_file_struct* fd, const uint8_t* buffer, uintp
                 /* empty file */
                 fd->dir_entry.cluster = cluster_num = fat_append_clusters(fd->fs, 0, 1);
                 if(!cluster_num)
-                    return -1;
+                    return 0;
             }
             else
             {
@@ -1134,11 +1133,16 @@ intptr_t fat_write_file(struct fat_file_struct* fd, const uint8_t* buffer, uintp
             {
                 pos -= cluster_size;
                 cluster_num_next = fat_get_next_cluster(fd->fs, cluster_num);
-                if(!cluster_num_next && pos == 0)
+                if(!cluster_num_next)
+                {
+                    if(pos != 0)
+                        return -1; /* current file position points beyond end of file */
+
                     /* the file exactly ends on a cluster boundary, and we append to it */
                     cluster_num_next = fat_append_clusters(fd->fs, cluster_num, 1);
-                if(!cluster_num_next)
-                    return -1;
+                    if(!cluster_num_next)
+                        return 0;
+                }
 
                 cluster_num = cluster_num_next;
             }
@@ -1189,9 +1193,9 @@ intptr_t fat_write_file(struct fat_file_struct* fd, const uint8_t* buffer, uintp
     {
 #if !FAT_DELAY_DIRENTRY_UPDATE
         uint32_t size_old = fd->dir_entry.file_size;
-#else
+#else /*MB Changed*/
 		/* record the need to write */
-		fd->needs_write = 1;
+		fd->needs_write = 1; /*MB Changed*/
 #endif
 
         /* update file size */
@@ -1233,6 +1237,16 @@ intptr_t fat_write_file(struct fat_file_struct* fd, const uint8_t* buffer, uintp
  *
  * The resulting absolute offset is written to the location the \c offset
  * parameter points to.
+ *
+ * Calling this function can also be used to retrieve the current file position:
+   \code
+   int32_t file_pos = 0;
+   if(!fat_seek_file(fd, &file_pos, FAT_SEEK_CUR))
+   {
+       // error
+   }
+   // file_pos now contains the absolute file position
+   \endcode
  * 
  * \param[in] fd The file decriptor of the file on which to seek.
  * \param[in,out] offset A pointer to the new offset, as affected by the \c whence
@@ -1589,7 +1603,7 @@ uint8_t fat_reset_dir(struct fat_dir_struct* dd)
  */
 uint8_t fat_dir_entry_read_callback(uint8_t* buffer, offset_t offset, void* p)
 {
-  struct fat_read_dir_callback_arg* arg = (fat_read_dir_callback_arg*)p;
+  struct fat_read_dir_callback_arg* arg = (fat_read_dir_callback_arg*)p; /*MB Changed*/
     struct fat_dir_entry_struct* dir_entry = arg->dir_entry;
 
     arg->bytes_read += 32;
@@ -1690,15 +1704,15 @@ uint8_t fat_dir_entry_read_callback(uint8_t* buffer, offset_t offset, void* p)
         
         /* extract properties of file and store them within the structure */
         dir_entry->attributes = buffer[11];
-        dir_entry->cluster = ltoh16(*((uint16_t*) &buffer[26]));
+        dir_entry->cluster = read16(&buffer[26]);
 #if FAT_FAT32_SUPPORT
-        dir_entry->cluster |= ((cluster_t) ltoh16(*((uint16_t*) &buffer[20]))) << 16;
+        dir_entry->cluster |= ((cluster_t) read16(&buffer[20])) << 16;
 #endif
-        dir_entry->file_size = ltoh32(*((uint32_t*) &buffer[28]));
+        dir_entry->file_size = read32(&buffer[28]);
 
 #if FAT_DATETIME_SUPPORT
-        dir_entry->modification_time = ltoh16(*((uint16_t*) &buffer[22]));
-        dir_entry->modification_date = ltoh16(*((uint16_t*) &buffer[24]));
+        dir_entry->modification_time = read16(&buffer[22]);
+        dir_entry->modification_date = read16(&buffer[24]);
 #endif
 
         arg->finished = 1;
@@ -1958,14 +1972,14 @@ uint8_t fat_write_dir_entry(const struct fat_fs_struct* fs, struct fat_dir_entry
     memset(&buffer[11], 0, sizeof(buffer) - 11);
     buffer[0x0b] = dir_entry->attributes;
 #if FAT_DATETIME_SUPPORT
-    *((uint16_t*) &buffer[0x16]) = htol16(dir_entry->modification_time);
-    *((uint16_t*) &buffer[0x18]) = htol16(dir_entry->modification_date);
+    write16(&buffer[0x16], dir_entry->modification_time);
+    write16(&buffer[0x18], dir_entry->modification_date);
 #endif
 #if FAT_FAT32_SUPPORT
-    *((uint16_t*) &buffer[0x14]) = htol16((uint16_t) (dir_entry->cluster >> 16));
+    write16(&buffer[0x14], (uint16_t) (dir_entry->cluster >> 16));
 #endif
-    *((uint16_t*) &buffer[0x1a]) = htol16(dir_entry->cluster);
-    *((uint32_t*) &buffer[0x1c]) = htol32(dir_entry->file_size);
+    write16(&buffer[0x1a], dir_entry->cluster);
+    write32(&buffer[0x1c], dir_entry->file_size);
 
     /* write to disk */
 #if FAT_LFN_SUPPORT
@@ -2056,8 +2070,8 @@ uint8_t fat_write_dir_entry(const struct fat_fs_struct* fs, struct fat_dir_entry
  *
  * \param[in] parent The handle of the directory in which to create the file.
  * \param[in] file The name of the file to create.
- * \param[out] dir_entry The directory entry to fill for the new file.
- * \returns 0 on failure, 1 on success.
+ * \param[out] dir_entry The directory entry to fill for the new (or existing) file.
+ * \returns 0 on failure, 1 on success, 2 if the file already existed.
  * \see fat_delete_file
  */
 uint8_t fat_create_file(struct fat_dir_struct* parent, const char* file, struct fat_dir_entry_struct* dir_entry)
@@ -2074,7 +2088,7 @@ uint8_t fat_create_file(struct fat_dir_struct* parent, const char* file, struct 
         if(strcmp(file, dir_entry->long_name) == 0)
         {
             fat_reset_dir(parent);
-            return 0;
+            return 2;
         }
     }
 
@@ -2158,6 +2172,73 @@ uint8_t fat_delete_file(struct fat_fs_struct* fs, struct fat_dir_entry_struct* d
 
 #if DOXYGEN || FAT_WRITE_SUPPORT
 /**
+ * \ingroup fat_file
+ * Moves or renames a file.
+ *
+ * Changes a file's name, optionally moving it into another
+ * directory as well. Before calling this function, the
+ * target file name must not exist. Moving a file to a
+ * different filesystem (i.e. \a parent_new doesn't lie on
+ * \a fs) is not supported.
+ * 
+ * After successfully renaming (and moving) the file, the
+ * given directory entry is updated such that it points to
+ * the file's new location.
+ *
+ * \note The notes which apply to fat_create_file() also
+ * apply to this function.
+ *
+ * \param[in] fs The filesystem on which to operate.
+ * \param[in,out] dir_entry The directory entry of the file to move.
+ * \param[in] parent_new The handle of the new parent directory of the file.
+ * \param[in] file_new The file's new name.
+ * \returns 0 on failure, 1 on success.
+ * \see fat_create_file, fat_delete_file, fat_move_dir
+ */
+uint8_t fat_move_file(struct fat_fs_struct* fs, struct fat_dir_entry_struct* dir_entry, struct fat_dir_struct* parent_new, const char* file_new)
+{
+    if(!fs || !dir_entry || !parent_new || (file_new && !file_new[0]))
+        return 0;
+    if(fs != parent_new->fs)
+        return 0;
+
+    /* use existing file name if none has been specified */
+    if(!file_new)
+        file_new = dir_entry->long_name;
+
+    /* create file with new file name */
+    struct fat_dir_entry_struct dir_entry_new;
+    if(!fat_create_file(parent_new, file_new, &dir_entry_new))
+        return 0;
+
+    /* copy members of directory entry which do not change with rename */
+    dir_entry_new.attributes = dir_entry->attributes;
+#if FAT_DATETIME_SUPPORT
+    dir_entry_new.modification_time = dir_entry->modification_time;
+    dir_entry_new.modification_date = dir_entry->modification_date;
+#endif
+    dir_entry_new.cluster = dir_entry->cluster;
+    dir_entry_new.file_size = dir_entry->file_size;
+
+    /* make the new file name point to the old file's content */
+    if(!fat_write_dir_entry(fs, &dir_entry_new))
+    {
+        fat_delete_file(fs, &dir_entry_new);
+        return 0;
+    }
+    
+    /* delete the old file, but not its clusters, which have already been remapped above */
+    dir_entry->cluster = 0;
+    if(!fat_delete_file(fs, dir_entry))
+        return 0;
+
+    *dir_entry = dir_entry_new;
+    return 1;
+}
+#endif
+
+#if DOXYGEN || FAT_WRITE_SUPPORT
+/**
  * \ingroup fat_dir
  * Creates a directory.
  *
@@ -2166,7 +2247,7 @@ uint8_t fat_delete_file(struct fat_fs_struct* fs, struct fat_dir_entry_struct* d
  * directory entry will be returned within the dir_entry
  * parameter.
  *
- * \note The notes which apply to fat_create_file also
+ * \note The notes which apply to fat_create_file() also
  * apply to this function.
  *
  * \param[in] parent The handle of the parent directory of the new directory.
@@ -2263,6 +2344,23 @@ uint8_t fat_create_dir(struct fat_dir_struct* parent, const char* dir, struct fa
  */
 #ifdef DOXYGEN
 uint8_t fat_delete_dir(struct fat_fs_struct* fs, struct fat_dir_entry_struct* dir_entry);
+#endif
+
+/**
+ * \ingroup fat_dir
+ * Moves or renames a directory.
+ *
+ * This is just a synonym for fat_move_file().
+ * 
+ * \param[in] fs The filesystem on which to operate.
+ * \param[in,out] dir_entry The directory entry of the directory to move.
+ * \param[in] parent_new The handle of the new parent directory.
+ * \param[in] dir_new The directory's new name.
+ * \returns 0 on failure, 1 on success.
+ * \see fat_create_dir, fat_delete_dir, fat_move_file
+ */
+#ifdef DOXYGEN
+uint8_t fat_move_dir(struct fat_fs_struct* fs, struct fat_dir_entry_struct* dir_entry, struct fat_dir_struct* parent_new, const char* dir_new);
 #endif
 
 #if DOXYGEN || FAT_DATETIME_SUPPORT
@@ -2433,7 +2531,7 @@ uint8_t fat_get_fs_free_16_callback(uint8_t* buffer, offset_t offset, void* p)
 
     for(uintptr_t i = 0; i < buffer_size; i += 2, buffer += 2)
     {
-        uint16_t cluster = *((uint16_t*) &buffer[0]);
+        uint16_t cluster = read16(buffer);
         if(cluster == HTOL16(FAT16_CLUSTER_FREE))
             ++(count_arg->cluster_count);
     }
@@ -2453,7 +2551,7 @@ uint8_t fat_get_fs_free_32_callback(uint8_t* buffer, offset_t offset, void* p)
 
     for(uintptr_t i = 0; i < buffer_size; i += 4, buffer += 4)
     {
-        uint32_t cluster = *((uint32_t*) &buffer[0]);
+        uint32_t cluster = read32(buffer);
         if(cluster == HTOL32(FAT32_CLUSTER_FREE))
             ++(count_arg->cluster_count);
     }

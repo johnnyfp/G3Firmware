@@ -24,8 +24,8 @@
 #include <util/atomic.h>
 #include <avr/sfr_defs.h>
 #include <avr/io.h>
-#include "Eeprom.hh"
-#include "EepromMap.hh"
+#include "SharedEepromMap.hh"
+#include "eeprom.hh"
 
 ExtruderBoard ExtruderBoard::extruder_board;
 
@@ -44,12 +44,12 @@ ExtruderBoard::ExtruderBoard() :
 		micros(0L),
 		extruder_thermistor(THERMISTOR_PIN,0),
 		platform_thermistor(PLATFORM_PIN,1),
-                extruder_heater(extruder_thermistor,extruder_element,SAMPLE_INTERVAL_MICROS_THERMISTOR,eeprom::EXTRUDER_PID_BASE),
-                platform_heater(platform_thermistor,platform_element,SAMPLE_INTERVAL_MICROS_THERMISTOR,eeprom::HBP_PID_BASE),
+                extruder_heater(extruder_thermistor,extruder_element,SAMPLE_INTERVAL_MICROS_THERMISTOR,extrudereeprom::EXTRUDER_PID_BASE),
+                platform_heater(platform_thermistor,platform_element,SAMPLE_INTERVAL_MICROS_THERMISTOR,extrudereeprom::HBP_PID_BASE),
 		using_platform(true)
 {
 	// Check eeprom map to see if motor has been swapped to other driver chip
-	uint16_t ef = eeprom::getEeprom16(eeprom::EXTRA_FEATURES,eeprom::EF_DEFAULT);
+	uint16_t ef = eeprom::getEeprom16(extrudereeprom::EXTRA_FEATURES,extrudereeprom::EF_DEFAULT);
 	heater_channel = (ChannelChoice)((ef >> 2) & 0x03);
 	hbp_channel = (ChannelChoice)((ef >> 4) & 0x03);
 	abp_channel = (ChannelChoice)((ef >> 6) & 0x03);
@@ -175,7 +175,7 @@ void ExtruderBoard::reset(uint8_t resetFlags) {
 	setMotorSpeed(0);
 	setMotorSpeedRPM(0, true);
 
-        slave_id = eeprom::getEeprom8(eeprom::SLAVE_ID, 0);
+        slave_id = eeprom::getEeprom8(extrudereeprom::SLAVE_ID, 0);
 
         motor_controller.reset();
 }

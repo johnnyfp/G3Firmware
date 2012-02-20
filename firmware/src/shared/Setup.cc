@@ -13,149 +13,17 @@
 #include "Version.hh"
 #include <util/delay.h>
 #include <stdlib.h>
+#include <Math.h>
 #include "SDCard.hh"
 #include "SharedEepromMap.hh"
-#include "Eeprom.hh"
+#include "eeprom.hh"
 #include <avr/eeprom.h>
 #include "ExtruderControl.hh"
+#include "AxisPerMM.hh"
+#include "Menu.hh"
 
-Point homePosition;
+int16_t overrideExtrudeSeconds = 0;
 
-
-void TestMode::update(LiquidCrystal& lcd, bool forceRedraw) {
-	static PROGMEM prog_uchar line1[] = "To quit press   ";
-	static PROGMEM prog_uchar line2[] = "Cancel then Ok  ";
-	static PROGMEM prog_uchar line3[] = "----------------";
-	static PROGMEM prog_uchar butt1[] = "---  Zero    ---";
-	static PROGMEM prog_uchar butt2[] = "---  Ok      ---";
-	static PROGMEM prog_uchar butt3[] = "---  Y Minus ---";
-	static PROGMEM prog_uchar butt4[] = "---  Z Minus ---";
-	static PROGMEM prog_uchar butt5[] = "---  Y Plus  ---";
-	static PROGMEM prog_uchar butt6[] = "---  Z Plus  ---";
-	static PROGMEM prog_uchar butt7[] = "---  X Minus ---";
-	static PROGMEM prog_uchar butt8[] = "---  X Plus  ---";
-	static PROGMEM prog_uchar butt9[] = "---  Cancel  ---";
-	static PROGMEM prog_uchar butt10[] ="-Unknown Button--";
-	if (forceRedraw) {
-		lcd.setCursor(0,0);
-		lcd.writeFromPgmspace(line1);
-		lcd.setCursor(0,1);
-		lcd.writeFromPgmspace(line2);
-		lcd.setCursor(0,2);
-		lcd.writeFromPgmspace(line3);
-	}
-	
-		lcd.setCursor(0,3);
-	switch (buttonPressed) {
-	case ButtonArray::ZERO:
-		lcd.writeFromPgmspace(butt1);
-		break;
-	case ButtonArray::OK:
-		lcd.writeFromPgmspace(butt2);
-		break;
-	case ButtonArray::YMINUS:
-		lcd.writeFromPgmspace(butt3);
-		break;
-	case ButtonArray::ZMINUS:
-		lcd.writeFromPgmspace(butt4);
-		break;
-	case ButtonArray::YPLUS:
-		lcd.writeFromPgmspace(butt5);
-		break;
-	case ButtonArray::ZPLUS:
-		lcd.writeFromPgmspace(butt6);
-		break;
-	case ButtonArray::XMINUS:
-		lcd.writeFromPgmspace(butt7);
-		break;
-	case ButtonArray::XPLUS:
-		lcd.writeFromPgmspace(butt8);
-		break;
-	case ButtonArray::CANCEL:
-		lcd.writeFromPgmspace(butt9);
-		break;
-	case ButtonArray::UNKNOWN:
-		lcd.writeFromPgmspace(butt10);
-		break;
-	}
-}
-
-void TestMode::notifyButtonPressed(ButtonArray::ButtonName button) {
-	switch (button) {
-	case ButtonArray::ZERO:
-	case ButtonArray::OK:
-	case ButtonArray::YMINUS:
-	case ButtonArray::ZMINUS:
-	case ButtonArray::YPLUS:
-	case ButtonArray::ZPLUS:
-	case ButtonArray::XMINUS:
-	case ButtonArray::XPLUS:
-	case ButtonArray::CANCEL:
-		if ((button==ButtonArray::OK) && (buttonPressed==ButtonArray::CANCEL)) interface::popScreen();
-		buttonPressed=button;
-		break;
-	default:
-		buttonPressed=ButtonArray::UNKNOWN;
-	}
-}
-
-void TestMode::reset() {
-	buttonPressed=ButtonArray::UNKNOWN;
-}
-
-void VersionMode::reset() {
-}
-
-void VersionMode::update(LiquidCrystal& lcd, bool forceRedraw) {
-	const static PROGMEM prog_uchar version1[] = "Firmware Version";
-	const static PROGMEM prog_uchar version2[] = "----------------";
-	const static PROGMEM prog_uchar version3[] = "    MBoard:__.__";
-	const static PROGMEM prog_uchar version4[] = "  Extruder:__.__";
-
-	if (forceRedraw) {
-		lcd.clear();
-
-		lcd.setCursor(0,0);
-		lcd.writeFromPgmspace(version1);
-
-		lcd.setCursor(0,1);
-		lcd.writeFromPgmspace(version2);
-
-		lcd.setCursor(0,2);
-		lcd.writeFromPgmspace(version3);
-
-		lcd.setCursor(0,3);
-		lcd.writeFromPgmspace(version4);
-
-		//Display the motherboard version
-		lcd.setCursor(13, 2);
-		lcd.writeInt(firmware_version / 100, 1);
-
-		lcd.setCursor(15, 2);
-		lcd.writeInt(firmware_version-((firmware_version / 100)*100), 1);
-
-		//Display the extruder version
-		OutPacket responsePacket;
-
-		if (extruderControl(SLAVE_CMD_VERSION, EXTDR_CMD_GET, responsePacket, 0)) {
-			uint16_t extruderVersion = responsePacket.read16(1);
-
-			lcd.setCursor(13, 3);
-			lcd.writeInt(extruderVersion / 100, 1);
-
-			lcd.setCursor(15, 3);
-			lcd.writeInt(extruderVersion-((extruderVersion / 100)*100), 1);
-		} else {
-			lcd.setCursor(13, 3);
-			lcd.writeString("XX.XX");
-		}
-	} else {
-	}
-}
-
-void VersionMode::notifyButtonPressed(ButtonArray::ButtonName button) {
-	interface::popScreen();
-}
 
 void DisplaySetupMode::update(LiquidCrystal& lcd, bool forceRedraw) {
 	static PROGMEM prog_uchar line1[] = "Select screen   ";
@@ -207,287 +75,16 @@ void DisplaySetupMode::reset() {
   resetRequired=false;
 }
 
-void CalibrateMode::reset() {
-	//Disable stepps on axis 0, 1, 2, 3, 4
-	steppers::enableAxis(0, false);
-	steppers::enableAxis(1, false);
-	steppers::enableAxis(2, false);
-	steppers::enableAxis(3, false);
-	steppers::enableAxis(4, false);
-
-	lastCalibrationState = CS_NONE;
-	calibrationState = CS_START1;
-}
-
-void CalibrateMode::update(LiquidCrystal& lcd, bool forceRedraw) {
-	const static PROGMEM prog_uchar calib1[] = "Calibrate: Move ";
-	const static PROGMEM prog_uchar calib2[] = "build platform";
-	const static PROGMEM prog_uchar calib3[] = "until nozzle...";
-	const static PROGMEM prog_uchar calib4[] = "          (cont)";
-	const static PROGMEM prog_uchar calib5[] = "lies in center,";
-	const static PROGMEM prog_uchar calib6[] = "turn threaded";
-	const static PROGMEM prog_uchar calib7[] = "rod until...";
-	const static PROGMEM prog_uchar calib8[] = "nozzle just";
-	const static PROGMEM prog_uchar calib9[] = "touches.";
-	const static PROGMEM prog_uchar homeZ[]  = "Homing Z...";
-	const static PROGMEM prog_uchar homeY[]  = "Homing Y...";
-	const static PROGMEM prog_uchar homeX[]  = "Homing X...";
-	const static PROGMEM prog_uchar done[]   = "! Calibrated !";
-	const static PROGMEM prog_uchar regen[]  = "Regenerate gcode";
-	const static PROGMEM prog_uchar reset[]  = "         (reset)";
-
-	if ((forceRedraw) || (calibrationState != lastCalibrationState)) {
-		lcd.clear();
-		lcd.setCursor(0,0);
-		switch(calibrationState) {
-			case CS_START1:
-				lcd.writeFromPgmspace(calib1);
-				lcd.setCursor(0,1);
-				lcd.writeFromPgmspace(calib2);
-				lcd.setCursor(0,2);
-				lcd.writeFromPgmspace(calib3);
-				lcd.setCursor(0,3);
-				lcd.writeFromPgmspace(calib4);
-				break;
-			case CS_START2:
-				lcd.writeFromPgmspace(calib5);
-				lcd.setCursor(0,1);
-				lcd.writeFromPgmspace(calib6);
-				lcd.setCursor(0,2);
-				lcd.writeFromPgmspace(calib7);
-				lcd.setCursor(0,3);
-				lcd.writeFromPgmspace(calib4);
-				break;
-			case CS_PROMPT_MOVE:
-				lcd.writeFromPgmspace(calib8);
-				lcd.setCursor(0,1);
-				lcd.writeFromPgmspace(calib9);
-				lcd.setCursor(0,3);
-				lcd.writeFromPgmspace(calib4);
-				break;
-			case CS_HOME_Z:
-			case CS_HOME_Z_WAIT:
-				lcd.writeFromPgmspace(homeZ);
-				break;
-			case CS_HOME_Y:
-			case CS_HOME_Y_WAIT:
-				lcd.writeFromPgmspace(homeY);
-				break;
-			case CS_HOME_X:
-			case CS_HOME_X_WAIT:
-				lcd.writeFromPgmspace(homeX);
-				break;
-			case CS_PROMPT_CALIBRATED:
-				lcd.writeFromPgmspace(done);
-				lcd.setCursor(0,1);
-				lcd.writeFromPgmspace(regen);
-				lcd.setCursor(0,3);
-				lcd.writeFromPgmspace(reset);
-				break;
-		}
-	}
-
-	lastCalibrationState = calibrationState;
-
-	//Change the state
-	//Some states are changed when a button is pressed via notifyButton
-	//Some states are changed when something completes, in which case we do it here
-	uint8_t axes;
-
-	switch(calibrationState) {
-		case CS_HOME_Z:
-			//Declare current position to be x=0, y=0, z=0, a=0, b=0
-			steppers::definePosition(Point(0,0,0,0,0));
-			steppers::startHoming(true, 0x04, (uint32_t)2000);
-			calibrationState = CS_HOME_Z_WAIT;
-			break;
-		case CS_HOME_Z_WAIT:
-			if ( ! steppers::isHoming() )	calibrationState = CS_HOME_Y;
-			break;
-		case CS_HOME_Y:
-			steppers::startHoming(false, 0x02, (uint32_t)2000);
-			calibrationState = CS_HOME_Y_WAIT;
-			break;
-		case CS_HOME_Y_WAIT:
-			if ( ! steppers::isHoming() )	calibrationState = CS_HOME_X;
-			break;
-		case CS_HOME_X:
-			steppers::startHoming(false, 0x01, (uint32_t)2000);
-			calibrationState = CS_HOME_X_WAIT;
-			break;
-		case CS_HOME_X_WAIT:
-			if ( ! steppers::isHoming() ) {
-				//Record current X, Y, Z, A, B co-ordinates to the motherboard
-				for (uint8_t i = 0; i < STEPPER_COUNT; i++) {
-					uint16_t offset = mbeeprom::AXIS_HOME_POSITIONS + 4*i;
-					uint32_t position = steppers::getPosition()[i];
-					cli();
-					eeprom_write_block(&position, (void*) offset, 4);
-					sei();
-				}
-
-				//Disable stepps on axis 0, 1, 2, 3, 4
-				steppers::enableAxis(0, false);
-				steppers::enableAxis(1, false);
-				steppers::enableAxis(2, false);
-				steppers::enableAxis(3, false);
-				steppers::enableAxis(4, false);
-
-				calibrationState = CS_PROMPT_CALIBRATED;
-			}
-			break;
-	}
-}
-
-void CalibrateMode::notifyButtonPressed(ButtonArray::ButtonName button) {
-
-	if ( calibrationState == CS_PROMPT_CALIBRATED ) {
-		host::stopBuild();
-		return;
-	}
-
-	switch (button) {
-        	case ButtonArray::OK:
-        	case ButtonArray::YMINUS:
-        	case ButtonArray::ZMINUS:
-        	case ButtonArray::YPLUS:
-        	case ButtonArray::ZPLUS:
-        	case ButtonArray::XMINUS:
-        	case ButtonArray::XPLUS:
-        	case ButtonArray::ZERO:
-			if (( calibrationState == CS_START1 ) || ( calibrationState == CS_START2 ) ||
-			    (calibrationState == CS_PROMPT_MOVE ))	calibrationState = (enum calibrateState)((uint8_t)calibrationState + 1);
-			break;
-        	case ButtonArray::CANCEL:
-               		interface::popScreen();
-			break;
-	}
-}
-
-void HomeOffsetsMode::reset() {
-	homePosition = steppers::getPosition();
-
-	for (uint8_t i = 0; i < STEPPER_COUNT; i++) {
-		uint16_t offset = mbeeprom::AXIS_HOME_POSITIONS + 4*i;
-		cli();
-		eeprom_read_block(&(homePosition[i]), (void*) offset, 4);
-		sei();
-	}
-
-	lastHomeOffsetState = HOS_NONE;
-	homeOffsetState	    = HOS_OFFSET_X;
-}
-
-void HomeOffsetsMode::update(LiquidCrystal& lcd, bool forceRedraw) {
-	const static PROGMEM prog_uchar message1x[] = "X Offset(steps):";
-	const static PROGMEM prog_uchar message1y[] = "Y Offset(steps):";
-	const static PROGMEM prog_uchar message1z[] = "Z Offset(steps):";
-	const static PROGMEM prog_uchar message4[]  = "Up/Dn/Ent to Set";
-	const static PROGMEM prog_uchar blank[]     = " ";
-
-	if ( homeOffsetState != lastHomeOffsetState )	forceRedraw = true;
-
-	if (forceRedraw) {
-		lcd.clear();
-
-		lcd.setCursor(0,0);
-		switch(homeOffsetState) {
-			case HOS_OFFSET_X:
-				lcd.writeFromPgmspace(message1x);
-				break;
-                	case HOS_OFFSET_Y:
-				lcd.writeFromPgmspace(message1y);
-				break;
-                	case HOS_OFFSET_Z:
-				lcd.writeFromPgmspace(message1z);
-				break;
-		}
-
-		lcd.setCursor(0,3);
-		lcd.writeFromPgmspace(message4);
-	}
-
-	float position = 0.0;
-
-	switch(homeOffsetState) {
-		case HOS_OFFSET_X:
-			position = (float)homePosition[0];
-			break;
-		case HOS_OFFSET_Y:
-			position = (float)homePosition[1];
-			break;
-		case HOS_OFFSET_Z:
-			position = (float)homePosition[2];
-			break;
-	}
-
-	lcd.setCursor(0,1);
-	lcd.writeFloat((float)position, 0);
-
-	lastHomeOffsetState = homeOffsetState;
-}
-
-void HomeOffsetsMode::notifyButtonPressed(ButtonArray::ButtonName button) {
-	if (( homeOffsetState == HOS_OFFSET_Z ) && (button == ButtonArray::OK )) {
-		//Write the new home positions
-		for (uint8_t i = 0; i < STEPPER_COUNT; i++) {
-			uint16_t offset = mbeeprom::AXIS_HOME_POSITIONS + 4*i;
-			uint32_t position = homePosition[i];
-			cli();
-			eeprom_write_block(&position, (void*) offset, 4);
-			sei();
-		}
-
-		host::stopBuild();
-		return;
-	}
-
-	float currentPosition;
-	uint8_t currentIndex = homeOffsetState - HOS_OFFSET_X;
-
-	currentPosition = (float)homePosition[currentIndex];
-
-	switch (button) {
-		case ButtonArray::CANCEL:
-			interface::popScreen();
-			break;
-		case ButtonArray::ZERO:
-		case ButtonArray::OK:
-			if 	( homeOffsetState == HOS_OFFSET_X )	homeOffsetState = HOS_OFFSET_Y;
-			else if ( homeOffsetState == HOS_OFFSET_Y )	homeOffsetState = HOS_OFFSET_Z;
-			break;
-		case ButtonArray::ZPLUS:
-			// increment more
-			currentPosition += 5.0;
-			break;
-		case ButtonArray::ZMINUS:
-			// decrement more
-			currentPosition -= 5.0;
-			break;
-		case ButtonArray::YPLUS:
-			// increment less
-			currentPosition += 1;
-			break;
-		case ButtonArray::YMINUS:
-			// decrement less
-			currentPosition -= 1.0;
-			break;
-		case ButtonArray::XMINUS:
-		case ButtonArray::XPLUS:
-			break;
-	}
-
-	homePosition[currentIndex] = (int32_t)currentPosition;
-}
-
 void MoodLightMode::reset() {
 	updatePhase = 0;
+	scriptId = eeprom_read_byte((uint8_t *)mbeeprom::MOOD_LIGHT_SCRIPT);
+
 }
 
 void MoodLightMode::update(LiquidCrystal& lcd, bool forceRedraw) {
 	const static PROGMEM prog_uchar mood1[] = "Mood: ";
 	const static PROGMEM prog_uchar mood3_1[] = "(set RGB)";
-	const static PROGMEM prog_uchar mood3_2[] = "(mood)";
+	const static PROGMEM prog_uchar msg4[] = "Up/Dn/Ent to Set";
 	const static PROGMEM prog_uchar blank[]   = "          ";
 	const static PROGMEM prog_uchar moodNotPresent1[] = "Mood Light not";
 	const static PROGMEM prog_uchar moodNotPresent2[] = "present!!";
@@ -519,12 +116,12 @@ void MoodLightMode::update(LiquidCrystal& lcd, bool forceRedraw) {
 		lcd.setCursor(0,0);
 		lcd.writeFromPgmspace(mood1);
 
-		lcd.setCursor(10,2);
-		lcd.writeFromPgmspace(mood3_2);
+		lcd.setCursor(0,3);
+		lcd.writeFromPgmspace(msg4);
+
 	}
 
  	//Redraw tool info
-	uint8_t scriptId = eeprom_read_byte((uint8_t *)mbeeprom::MOOD_LIGHT_SCRIPT);
 
 	switch (updatePhase) {
 	case 0:
@@ -547,46 +144,68 @@ void MoodLightMode::update(LiquidCrystal& lcd, bool forceRedraw) {
 	}
 }
 
-
-
 void MoodLightMode::notifyButtonPressed(ButtonArray::ButtonName button) {
-	uint8_t scriptId;
 
+	
 	if ( ! interface::moodLightController().blinkM.blinkMIsPresent )	interface::popScreen();
-
+	
+	uint8_t i;
+	
 	switch (button) {
-        	case ButtonArray::OK:
-			//Change the script to the next script id
-			scriptId = eeprom_read_byte((uint8_t *)mbeeprom::MOOD_LIGHT_SCRIPT);
-			scriptId = interface::moodLightController().nextScriptId(scriptId);
+		case ButtonArray::OK:
+		
 			eeprom_write_byte((uint8_t *)mbeeprom::MOOD_LIGHT_SCRIPT, scriptId);
-			interface::moodLightController().playScript(scriptId);
+			interface::popScreen();
 			break;
-
-        	case ButtonArray::ZERO:
+		
+		case ButtonArray::ZERO:
 			scriptId = eeprom_read_byte((uint8_t *)mbeeprom::MOOD_LIGHT_SCRIPT);
 			if ( scriptId == 1 )
 			{
-				//Set RGB Values
-                        	interface::pushScreen(&moodLightSetRGBScreen);
+			//Set RGB Values
+			interface::pushScreen(&moodLightSetRGBScreen);
 			}
-
+			
 			break;
-
-        	case ButtonArray::YPLUS:
-        	case ButtonArray::YMINUS:
-        	case ButtonArray::XMINUS:
-        	case ButtonArray::XPLUS:
-        	case ButtonArray::ZMINUS:
-        	case ButtonArray::ZPLUS:
-        		break;
-
-       	 	case ButtonArray::CANCEL:
-               		interface::popScreen();
+		
+		case ButtonArray::ZPLUS:
+			// increment more
+			for ( i = 0; i < 5; i ++ )
+			scriptId = interface::moodLightController().nextScriptId(scriptId);
+			interface::moodLightController().playScript(scriptId);
+			break;
+		
+		case ButtonArray::ZMINUS:
+			// decrement more
+			for ( i = 0; i < 5; i ++ )
+			scriptId = interface::moodLightController().prevScriptId(scriptId);
+			interface::moodLightController().playScript(scriptId);
+			break;
+		
+		case ButtonArray::YPLUS:
+			// increment less
+			scriptId = interface::moodLightController().nextScriptId(scriptId);
+			interface::moodLightController().playScript(scriptId);
+			break;
+		
+		case ButtonArray::YMINUS:
+			// decrement less
+			scriptId = interface::moodLightController().prevScriptId(scriptId);
+			interface::moodLightController().playScript(scriptId);
+			break;
+		
+		case ButtonArray::XMINUS:
+		case ButtonArray::XPLUS:
+			break;
+		
+		case ButtonArray::CANCEL:
+			scriptId = eeprom_read_byte((uint8_t *)mbeeprom::MOOD_LIGHT_SCRIPT);
+			interface::moodLightController().playScript(scriptId);
+			
+			interface::popScreen();
 			break;
 	}
 }
-
 
 void MoodLightSetRGBScreen::reset() {
 	inputMode = 0;	//Red
@@ -674,212 +293,906 @@ void MoodLightSetRGBScreen::notifyButtonPressed(ButtonArray::ButtonName button) 
 	}
 }
 
-void TestEndStopsMode::reset() {
+
+void BuzzerSetRepeatsMode::reset() {
+	repeats = eeprom::getEeprom8(mbeeprom::BUZZER_REPEATS, 3);
 }
 
-void TestEndStopsMode::update(LiquidCrystal& lcd, bool forceRedraw) {
-	const static PROGMEM prog_uchar test1[] = "Test End Stops: ";
-	const static PROGMEM prog_uchar test2[] = "(press end stop)";
-	const static PROGMEM prog_uchar test3[] = "X___:N    Y___:N";
-	const static PROGMEM prog_uchar test4[] = "Z___:N";
-	const static PROGMEM prog_uchar strY[]  = "Y";
-	const static PROGMEM prog_uchar strN[]  = "N";
-	const static PROGMEM prog_uchar strmin[]   = "Min";
-	const static PROGMEM prog_uchar strmax[]   = "Max";
-	
-	uint8_t minmax=eeprom::getEeprom8(mbeeprom::AXIS_HOME_MINMAX, 0b00000001);
-	
-	if (forceRedraw) {
-		lcd.clear();
-		lcd.setCursor(0,0);
-		lcd.writeFromPgmspace(test1);
-
-		lcd.setCursor(0,1);
-		lcd.writeFromPgmspace(test2);
-
-		lcd.setCursor(0,2);
-		lcd.writeFromPgmspace(test3);
-
-		lcd.setCursor(0,3);
-		lcd.writeFromPgmspace(test4);
-	}
-
-	lcd.setCursor(1,2);
-	if (minmax&0b00000001==0b00000001) {
-		lcd.writeFromPgmspace(strmin);
-		lcd.setCursor(5, 2);
-		if ( steppers::isAtMinimum(0) ) lcd.writeFromPgmspace(strY);
-		else	lcd.writeFromPgmspace(strN);
-	} else {
-		lcd.writeFromPgmspace(strmin);
-		lcd.setCursor(5, 2);
-		if ( steppers::isAtMaximum(0) ) lcd.writeFromPgmspace(strY);
-		else	lcd.writeFromPgmspace(strN);
-	}
-
-	lcd.setCursor(11,2);
-	if (minmax&0b00000010==0b00000010) {
-		lcd.writeFromPgmspace(strmin);
-		lcd.setCursor(15, 2);
-		if ( steppers::isAtMinimum(0) ) lcd.writeFromPgmspace(strY);
-		else	lcd.writeFromPgmspace(strN);
-	} else {
-		lcd.writeFromPgmspace(strmin);
-		lcd.setCursor(15, 2);
-		if ( steppers::isAtMaximum(0) ) lcd.writeFromPgmspace(strY);
-		else	lcd.writeFromPgmspace(strN);
-	}
-	
-	lcd.setCursor(1,3);
-	if (minmax&0b00000100==0b00000100) {
-		lcd.writeFromPgmspace(strmin);
-		lcd.setCursor(5, 3);
-		if ( steppers::isAtMinimum(0) ) lcd.writeFromPgmspace(strY);
-		else	lcd.writeFromPgmspace(strN);
-	} else {
-		lcd.writeFromPgmspace(strmin);
-		lcd.setCursor(5, 3);
-		if ( steppers::isAtMaximum(0) ) lcd.writeFromPgmspace(strY);
-		else	lcd.writeFromPgmspace(strN);
-	}
-}
-
-void TestEndStopsMode::notifyButtonPressed(ButtonArray::ButtonName button) {
-	switch (button) {
-        	case ButtonArray::YMINUS:
-        	case ButtonArray::ZMINUS:
-        	case ButtonArray::YPLUS:
-        	case ButtonArray::ZPLUS:
-        	case ButtonArray::XMINUS:
-        	case ButtonArray::XPLUS:
-        	case ButtonArray::ZERO:
-        	case ButtonArray::OK:
-        	case ButtonArray::CANCEL:
-               		interface::popScreen();
-			break;
-	}
-}
-
-
-
-
-void HomeAxisMode::update(LiquidCrystal& lcd, bool forceRedraw) {
-	const static PROGMEM prog_uchar home1[] = "Home Axis: ";
-	const static PROGMEM prog_uchar home2[] = "   Y          Z ";
-	const static PROGMEM prog_uchar home3[] = " X   X          ";
-	const static PROGMEM prog_uchar home4[] = "   Y          Z ";
+void BuzzerSetRepeatsMode::update(LiquidCrystal& lcd, bool forceRedraw) {
+	const static PROGMEM prog_uchar message1[] = "Repeat Buzzer:";
+	const static PROGMEM prog_uchar message2[] = "(0=Buzzer Off)";
+	const static PROGMEM prog_uchar message4[] = "Up/Dn/Ent to Set";
+	const static PROGMEM prog_uchar times[]    = " times ";
 
 	if (forceRedraw) {
 		lcd.clear();
+
 		lcd.setCursor(0,0);
-		lcd.writeFromPgmspace(home1);
+		lcd.writeFromPgmspace(message1);
 
 		lcd.setCursor(0,1);
-		lcd.writeFromPgmspace(home2);
-
-		lcd.setCursor(0,2);
-		lcd.writeFromPgmspace(home3);
+		lcd.writeFromPgmspace(message2);
 
 		lcd.setCursor(0,3);
-		lcd.writeFromPgmspace(home4);
-	}
-}
-
-void HomeAxisMode::home(ButtonArray::ButtonName direction) {
-	uint8_t axis = 0;
-	bool 	maximums;
-
-	switch(direction) {
-	        case ButtonArray::XMINUS:
-      		case ButtonArray::XPLUS:
-			axis 	 = 0x01;
-			maximums = true;
-			break;
-        	case ButtonArray::YMINUS:
-        	case ButtonArray::YPLUS:
-			axis 	 = 0x02;
-			maximums = false;
-			break;
-        	case ButtonArray::ZMINUS:
-        	case ButtonArray::ZPLUS:
-			axis 	 = 0x04;
-			maximums = false;
-			break;
+		lcd.writeFromPgmspace(message4);
 	}
 
-	steppers::startHoming(maximums, axis, (uint32_t)2000);
+	// Redraw tool info
+	lcd.setCursor(0,2);
+	lcd.writeInt(repeats, 3);
+	lcd.writeFromPgmspace(times);
 }
 
-void HomeAxisMode::notifyButtonPressed(ButtonArray::ButtonName button) {
+void BuzzerSetRepeatsMode::notifyButtonPressed(ButtonArray::ButtonName button) {
 	switch (button) {
-        	case ButtonArray::YMINUS:
-        	case ButtonArray::ZMINUS:
-        	case ButtonArray::YPLUS:
-        	case ButtonArray::ZPLUS:
-        	case ButtonArray::XMINUS:
-        	case ButtonArray::XPLUS:
-			home(button);
+		case ButtonArray::CANCEL:
+			interface::popScreen();
 			break;
-        	case ButtonArray::ZERO:
-        	case ButtonArray::OK:
-        	case ButtonArray::CANCEL:
-			steppers::abort();
-			steppers::enableAxis(0, false);
-			steppers::enableAxis(1, false);
-			steppers::enableAxis(2, false);
-               		interface::popScreen();
+		case ButtonArray::ZERO:
+			break;
+		case ButtonArray::OK:
+			eeprom_write_byte((uint8_t *)mbeeprom::BUZZER_REPEATS, repeats);
+			interface::popScreen();
+			break;
+		case ButtonArray::ZPLUS:
+			// increment more
+			if (repeats <= 249) repeats += 5;
+			break;
+		case ButtonArray::ZMINUS:
+			// decrement more
+			if (repeats >= 5) repeats -= 5;
+			break;
+		case ButtonArray::YPLUS:
+			// increment less
+			if (repeats <= 253) repeats += 1;
+			break;
+		case ButtonArray::YMINUS:
+			// decrement less
+			if (repeats >= 1) repeats -= 1;
+			break;
+		case ButtonArray::XMINUS:
+		case ButtonArray::XPLUS:
 			break;
 	}
 }
+
+void ABPCopiesSetScreen::reset() {
+	value = eeprom::getEeprom8(mbeeprom::ABP_COPIES, 1);
+	if ( value < 1 ) {
+		eeprom_write_byte((uint8_t*)mbeeprom::ABP_COPIES,1);
+		value = eeprom::getEeprom8(mbeeprom::ABP_COPIES, 1); //Just in case
+	}
+}
+
+void ABPCopiesSetScreen::update(LiquidCrystal& lcd, bool forceRedraw) {
+	const static PROGMEM prog_uchar message1[] = "ABP Copies (SD):";
+	const static PROGMEM prog_uchar message4[] = "Up/Dn/Ent to Set";
+
+	if (forceRedraw) {
+		lcd.clear();
+
+		lcd.setCursor(0,0);
+		lcd.writeFromPgmspace(message1);
+
+		lcd.setCursor(0,3);
+		lcd.writeFromPgmspace(message4);
+	}
+
+	// Redraw tool info
+	lcd.setCursor(0,1);
+	lcd.writeInt(value,3);
+}
+
+void ABPCopiesSetScreen::notifyButtonPressed(ButtonArray::ButtonName button) {
+	switch (button) {
+        case ButtonArray::CANCEL:
+		interface::popScreen();
+		break;
+        case ButtonArray::ZERO:
+		break;
+        case ButtonArray::OK:
+		eeprom_write_byte((uint8_t*)mbeeprom::ABP_COPIES,value);
+		interface::popScreen();
+		interface::popScreen();
+		break;
+        case ButtonArray::ZPLUS:
+		// increment more
+		if (value <= 249) {
+			value += 5;
+		}
+		break;
+        case ButtonArray::ZMINUS:
+		// decrement more
+		if (value >= 6) {
+			value -= 5;
+		}
+		break;
+        case ButtonArray::YPLUS:
+		// increment less
+		if (value <= 253) {
+			value += 1;
+		}
+		break;
+        case ButtonArray::YMINUS:
+		// decrement less
+		if (value >= 2) {
+			value -= 1;
+		}
+		break;
+
+        case ButtonArray::XMINUS:
+        case ButtonArray::XPLUS:
+		break;
+	}
+}
+
+PreheatDuringEstimateMenu::PreheatDuringEstimateMenu() {
+	itemCount = 4;
+	reset();
+}
+
+void PreheatDuringEstimateMenu::resetState() {
+	if ( eeprom::getEeprom8(mbeeprom::PREHEAT_DURING_ESTIMATE, 0) ) 	itemIndex = 3;
+	else						 		itemIndex = 2;
+	firstItemIndex = 2;
+}
+
+void PreheatDuringEstimateMenu::drawItem(uint8_t index, LiquidCrystal& lcd) {
+	const static PROGMEM prog_uchar msg1[]    = "Preheat during";
+	const static PROGMEM prog_uchar msg2[]    = "estimate phase:";
+	const static PROGMEM prog_uchar disable[] = "Disable";
+	const static PROGMEM prog_uchar enable[]  = "Enable";
+
+	switch (index) {
+	case 0:
+		lcd.writeFromPgmspace(msg1);
+		break;
+	case 1:
+		lcd.writeFromPgmspace(msg2);
+		break;
+	case 2:
+		lcd.writeFromPgmspace(disable);
+		break;
+	case 3:
+		lcd.writeFromPgmspace(enable);
+		break;
+	}
+}
+
+void PreheatDuringEstimateMenu::handleSelect(uint8_t index) {
+	switch (index) {
+		case 2:
+			eeprom_write_byte((uint8_t*)mbeeprom::PREHEAT_DURING_ESTIMATE,0);
+			interface::popScreen();
+			break;
+		case 3:
+			eeprom_write_byte((uint8_t*)mbeeprom::PREHEAT_DURING_ESTIMATE,1);
+                	interface::popScreen();
+			break;
+	}
+}
+
+OverrideGCodeTempMenu::OverrideGCodeTempMenu() {
+	itemCount = 4;
+	reset();
+}
+
+void OverrideGCodeTempMenu::resetState() {
+	if ( eeprom::getEeprom8(mbeeprom::OVERRIDE_GCODE_TEMP, 0) ) 	itemIndex = 3;
+	else						 		itemIndex = 2;
+	firstItemIndex = 2;
+}
+
+void OverrideGCodeTempMenu::drawItem(uint8_t index, LiquidCrystal& lcd) {
+	const static PROGMEM prog_uchar msg1[]   = "Override GCode";
+	const static PROGMEM prog_uchar msg2[]   = "Temperature:";
+	const static PROGMEM prog_uchar disable[] =  "Disable";
+	const static PROGMEM prog_uchar enable[]  =  "Enable";
+
+	switch (index) {
+	case 0:
+		lcd.writeFromPgmspace(msg1);
+		break;
+	case 1:
+		lcd.writeFromPgmspace(msg2);
+		break;
+	case 2:
+		lcd.writeFromPgmspace(disable);
+		break;
+	case 3:
+		lcd.writeFromPgmspace(enable);
+		break;
+	}
+}
+
+void OverrideGCodeTempMenu::handleSelect(uint8_t index) {
+	switch (index) {
+		case 2:  
+			eeprom_write_byte((uint8_t*)mbeeprom::OVERRIDE_GCODE_TEMP,0);
+			interface::popScreen();
+			break;
+		case 3:
+			eeprom_write_byte((uint8_t*)mbeeprom::OVERRIDE_GCODE_TEMP,1);
+                	interface::popScreen();
+			break;
+	}
+}
+
+StepperDriverAcceleratedMenu::StepperDriverAcceleratedMenu() {
+	itemCount = 5;
+	reset();
+}
+
+void StepperDriverAcceleratedMenu::resetState() {
+	uint8_t accel = eeprom::getEeprom8(mbeeprom::STEPPER_DRIVER, 0);
+	if	( accel == 0x03 )	itemIndex = 4;
+	else if ( accel == 0x01 )	itemIndex = 3;
+	else				itemIndex = 2;
+	firstItemIndex = 2;
+}
+
+void StepperDriverAcceleratedMenu::drawItem(uint8_t index, LiquidCrystal& lcd) {
+	const static PROGMEM prog_uchar msg1[]   = "Accelerated";
+	const static PROGMEM prog_uchar msg2[]   = "Stepper Driver:";
+	const static PROGMEM prog_uchar off[]    =  "Off";
+	const static PROGMEM prog_uchar on[]     =  "On - No Planner";
+	const static PROGMEM prog_uchar planner[]=  "On - Planner";
+
+	switch (index) {
+	case 0:
+		lcd.writeFromPgmspace(msg1);
+		break;
+	case 1:
+		lcd.writeFromPgmspace(msg2);
+		break;
+	case 2:
+		lcd.writeFromPgmspace(off);
+		break;
+	case 3:
+		lcd.writeFromPgmspace(on);
+		break;
+	case 4:
+		lcd.writeFromPgmspace(planner);
+		break;
+	}
+}
+
+
+void AcceleratedSettingsMode::reset() {
+	cli();
+	values[0]	= eeprom::getEepromUInt32(mbeeprom::ACCEL_MAX_FEEDRATE_X, 160);
+	values[1]	= eeprom::getEepromUInt32(mbeeprom::ACCEL_MAX_FEEDRATE_Y, 160);
+	values[2]	= eeprom::getEepromUInt32(mbeeprom::ACCEL_MAX_FEEDRATE_Z, 10);
+	values[3]	= eeprom::getEepromUInt32(mbeeprom::ACCEL_MAX_FEEDRATE_A, 100);
+        values[4]	= eeprom::getEepromUInt32(mbeeprom::ACCEL_MAX_ACCELERATION_X, 2000);
+        values[5]	= eeprom::getEepromUInt32(mbeeprom::ACCEL_MAX_ACCELERATION_Y, 2000);
+        values[6]	= eeprom::getEepromUInt32(mbeeprom::ACCEL_MAX_ACCELERATION_Z, 150);
+        values[7]	= eeprom::getEepromUInt32(mbeeprom::ACCEL_MAX_ACCELERATION_A, 60000);
+        values[8]	= eeprom::getEepromUInt32(mbeeprom::ACCEL_MAX_EXTRUDER_NORM, 5000);
+        values[9]	= eeprom::getEepromUInt32(mbeeprom::ACCEL_MAX_EXTRUDER_RETRACT, 3000);
+	values[10]	= eeprom::getEepromUInt32(mbeeprom::ACCEL_MIN_FEED_RATE,0);
+	values[11]	= eeprom::getEepromUInt32(mbeeprom::ACCEL_MIN_TRAVEL_FEED_RATE,0);
+	values[12]	= eeprom::getEepromUInt32(mbeeprom::ACCEL_MAX_XY_JERK,2);
+	values[13]	= eeprom::getEepromUInt32(mbeeprom::ACCEL_MAX_Z_JERK,100);
+	values[14]	= eeprom::getEepromUInt32(mbeeprom::ACCEL_ADVANCE_K,50);
+	values[15]	= eeprom::getEepromUInt32(mbeeprom::ACCEL_FILAMENT_DIAMETER,175);
+	sei();
+
+	lastAccelerateSettingsState= AS_NONE;
+	accelerateSettingsState= AS_MAX_FEEDRATE_X;
+}
+
+void AcceleratedSettingsMode::update(LiquidCrystal& lcd, bool forceRedraw) {
+	const static PROGMEM prog_uchar message1xMaxFeedRate[]  	= "X MaxFeedRate:";
+	const static PROGMEM prog_uchar message1yMaxFeedRate[]  	= "Y MaxFeedRate:";
+	const static PROGMEM prog_uchar message1zMaxFeedRate[]  	= "Z MaxFeedRate:";
+	const static PROGMEM prog_uchar message1aMaxFeedRate[]  	= "A MaxFeedRate:";
+	const static PROGMEM prog_uchar message1xMaxAccelRate[] 	= "X Max Accel:";
+	const static PROGMEM prog_uchar message1yMaxAccelRate[] 	= "Y Max Accel:";
+	const static PROGMEM prog_uchar message1zMaxAccelRate[] 	= "Z Max Accel:";
+	const static PROGMEM prog_uchar message1aMaxAccelRate[] 	= "A Max Accel:";
+	const static PROGMEM prog_uchar message1ExtruderNorm[]  	= "Acc Norm Move:";
+	const static PROGMEM prog_uchar message1ExtruderRetract[]	= "Acc Extr Move:";
+	const static PROGMEM prog_uchar message1MinFeedRate[]		= "Min Feed Rate:";
+	const static PROGMEM prog_uchar message1MinTravelFeedRate[]	= "MinTrvlFeedRate:";
+	const static PROGMEM prog_uchar message1MaxXYJerk[]		= "Max XY Jerk:";
+	const static PROGMEM prog_uchar message1MaxZJerk[]		= "Max Z Jerk:";
+	const static PROGMEM prog_uchar message1AdvanceK[]		= "Advance K:";
+	const static PROGMEM prog_uchar message1FilamentDiameter[]	= "Filament Dia:";
+	const static PROGMEM prog_uchar message4[]  = "Up/Dn/Ent to Set";
+	const static PROGMEM prog_uchar blank[]     = "    ";
+
+	if ( accelerateSettingsState != lastAccelerateSettingsState )	forceRedraw = true;
+
+	if (forceRedraw) {
+		lcd.clear();
+
+		lcd.setCursor(0,0);
+		switch(accelerateSettingsState) {
+			case AS_MAX_FEEDRATE_X:
+				lcd.writeFromPgmspace(message1xMaxFeedRate);
+				break;
+                	case AS_MAX_FEEDRATE_Y:
+				lcd.writeFromPgmspace(message1yMaxFeedRate);
+				break;
+                	case AS_MAX_FEEDRATE_Z:
+				lcd.writeFromPgmspace(message1zMaxFeedRate);
+				break;
+                	case AS_MAX_FEEDRATE_A:
+				lcd.writeFromPgmspace(message1aMaxFeedRate);
+				break;
+                	case AS_MAX_ACCELERATION_X:
+				lcd.writeFromPgmspace(message1xMaxAccelRate);
+				break;
+                	case AS_MAX_ACCELERATION_Y:
+				lcd.writeFromPgmspace(message1yMaxAccelRate);
+				break;
+                	case AS_MAX_ACCELERATION_Z:
+				lcd.writeFromPgmspace(message1zMaxAccelRate);
+				break;
+                	case AS_MAX_ACCELERATION_A:
+				lcd.writeFromPgmspace(message1aMaxAccelRate);
+				break;
+                	case AS_MAX_EXTRUDER_NORM:
+				lcd.writeFromPgmspace(message1ExtruderNorm);
+				break;
+                	case AS_MAX_EXTRUDER_RETRACT:
+				lcd.writeFromPgmspace(message1ExtruderRetract);
+				break;
+                	case AS_MIN_FEED_RATE:
+				lcd.writeFromPgmspace(message1MinFeedRate);
+				break;
+                	case AS_MIN_TRAVEL_FEED_RATE:
+				lcd.writeFromPgmspace(message1MinTravelFeedRate);
+				break;
+                	case AS_MAX_XY_JERK:
+				lcd.writeFromPgmspace(message1MaxXYJerk);
+				break;
+                	case AS_MAX_Z_JERK:
+				lcd.writeFromPgmspace(message1MaxZJerk);
+				break;
+                	case AS_ADVANCE_K:
+				lcd.writeFromPgmspace(message1AdvanceK);
+				break;
+                	case AS_FILAMENT_DIAMETER:
+				lcd.writeFromPgmspace(message1FilamentDiameter);
+				break;
+		}
+
+		lcd.setCursor(0,3);
+		lcd.writeFromPgmspace(message4);
+	}
+
+	uint32_t value = 0;
+
+	uint8_t currentIndex = accelerateSettingsState - AS_MAX_FEEDRATE_X;
+
+	value = values[currentIndex];
+
+	lcd.setCursor(0,1);
+
+	switch(accelerateSettingsState) {
+		case AS_MIN_FEED_RATE:
+		case AS_MIN_TRAVEL_FEED_RATE:
+		case AS_MAX_XY_JERK:
+		case AS_MAX_Z_JERK:
+					lcd.writeFloat((float)value / 10.0, 1);
+					break;
+		case AS_ADVANCE_K:
+					lcd.writeFloat((float)value / 100000.0, 5);
+					break;
+		case AS_FILAMENT_DIAMETER:
+					lcd.writeFloat((float)value / 100.0, 2);
+					break;
+		default:
+					lcd.writeFloat((float)value, 0);
+					break;
+	}
+
+	lcd.writeFromPgmspace(blank);
+
+	lastAccelerateSettingsState = accelerateSettingsState;
+}
+
+void AcceleratedSettingsMode::notifyButtonPressed(ButtonArray::ButtonName button) {
+	if (( accelerateSettingsState == AS_FILAMENT_DIAMETER ) && (button == ButtonArray::OK )) {
+		//Write the data
+		cli();
+		eeprom::putEepromUInt32(mbeeprom::ACCEL_MAX_FEEDRATE_X,		values[0]);
+		eeprom::putEepromUInt32(mbeeprom::ACCEL_MAX_FEEDRATE_Y,		values[1]);
+		eeprom::putEepromUInt32(mbeeprom::ACCEL_MAX_FEEDRATE_Z,		values[2]);
+		eeprom::putEepromUInt32(mbeeprom::ACCEL_MAX_FEEDRATE_A,		values[3]);
+ 		eeprom::putEepromUInt32(mbeeprom::ACCEL_MAX_ACCELERATION_X,	values[4]);
+  	eeprom::putEepromUInt32(mbeeprom::ACCEL_MAX_ACCELERATION_Y,	values[5]);
+  	eeprom::putEepromUInt32(mbeeprom::ACCEL_MAX_ACCELERATION_Z,	values[6]);
+  	eeprom::putEepromUInt32(mbeeprom::ACCEL_MAX_ACCELERATION_A,	values[7]);
+  	eeprom::putEepromUInt32(mbeeprom::ACCEL_MAX_EXTRUDER_NORM,	values[8]);
+  	eeprom::putEepromUInt32(mbeeprom::ACCEL_MAX_EXTRUDER_RETRACT,	values[9]);
+		eeprom::putEepromUInt32(mbeeprom::ACCEL_MIN_FEED_RATE,		values[10]);
+		eeprom::putEepromUInt32(mbeeprom::ACCEL_MIN_TRAVEL_FEED_RATE,	values[11]);
+		eeprom::putEepromUInt32(mbeeprom::ACCEL_MAX_XY_JERK,		values[12]);
+		eeprom::putEepromUInt32(mbeeprom::ACCEL_MAX_Z_JERK,		values[13]);
+		eeprom::putEepromUInt32(mbeeprom::ACCEL_ADVANCE_K,		values[14]);
+		eeprom::putEepromUInt32(mbeeprom::ACCEL_FILAMENT_DIAMETER,	values[15]);
+		sei();
+
+		host::stopBuild();
+		return;
+	}
+
+	uint8_t currentIndex = accelerateSettingsState - AS_MAX_FEEDRATE_X;
+
+	uint32_t lastValue = values[currentIndex];
+
+	switch (button) {
+		case ButtonArray::CANCEL:
+			interface::popScreen();
+			break;
+		case ButtonArray::ZERO:
+			break;
+		case ButtonArray::OK:
+			accelerateSettingsState = (enum accelerateSettingsState)((uint8_t)accelerateSettingsState + 1);
+			return;
+			break;
+		case ButtonArray::ZPLUS:
+			// increment more
+			values[currentIndex] += 100;
+			break;
+		case ButtonArray::ZMINUS:
+			// decrement more
+			values[currentIndex] -= 100;
+			break;
+		case ButtonArray::YPLUS:
+			// increment less
+			values[currentIndex] += 1;
+			break;
+		case ButtonArray::YMINUS:
+			// decrement less
+			values[currentIndex] -= 1;
+			break;
+		case ButtonArray::XMINUS:
+		case ButtonArray::XPLUS:
+			break;
+	}
+
+	if (!(( accelerateSettingsState == AS_MIN_FEED_RATE ) || ( accelerateSettingsState == AS_MIN_TRAVEL_FEED_RATE ) || ( accelerateSettingsState == AS_ADVANCE_K ))) {
+		if ( values[currentIndex] < 1 )	values[currentIndex] = 1;
+	}
+
+	if ( values[currentIndex] > 200000 ) values[currentIndex] = 1;
+}
+
+AccelerationMenu::AccelerationMenu() {
+	itemCount = 3;
+
+	reset();
+}
+
+void AccelerationMenu::resetState() {
+	if ( eeprom::getEeprom8(mbeeprom::STEPPER_DRIVER, 0) )	acceleration = true;
+	else							acceleration = false;
+
+	if ( acceleration )	itemCount = 3;
+	else			itemCount = 1;
+
+	itemIndex = 0;
+	firstItemIndex = 0;
+}
+
+void AccelerationMenu::drawItem(uint8_t index, LiquidCrystal& lcd) {
+	const static PROGMEM prog_uchar msg1[]  = "Stepper Driver";
+	const static PROGMEM prog_uchar msg2[]  = "Accel. Settings";
+	const static PROGMEM prog_uchar msg3[]  = "Extdr. Steps/mm";
+
+	if (( ! acceleration ) && ( index > 0 ))	return;
+
+	switch (index) {
+	case 0:
+		lcd.writeFromPgmspace(msg1);
+		break;
+	case 1:
+		lcd.writeFromPgmspace(msg2);
+		break;
+	case 2:
+		lcd.writeFromPgmspace(msg3);
+		break;
+	}
+}
+
+void AccelerationMenu::handleSelect(uint8_t index) {
+	if (( ! acceleration ) && ( index > 0 ))	return;
+
+	switch (index) {
+		case 0:
+			interface::pushScreen(&stepperDriverAcceleratedMenu);
+			break;
+		case 1:
+			interface::pushScreen(&acceleratedSettingsMode);
+			break;
+		case 2:
+			interface::pushScreen(&eStepsPerMMMode);
+			break;
+	}
+}
+
+void EStepsPerMMMode::reset() {
+	value = eeprom::getEepromUInt32(mbeeprom::ACCEL_E_STEPS_PER_MM, 44);
+	if ( value < 1 ) {
+		eeprom::putEepromUInt32(mbeeprom::ACCEL_E_STEPS_PER_MM, 44);
+		value = eeprom::getEepromUInt32(mbeeprom::ACCEL_E_STEPS_PER_MM, 44); //Just in case
+	}
+}
+
+void EStepsPerMMMode::update(LiquidCrystal& lcd, bool forceRedraw) {
+	const static PROGMEM prog_uchar message1[] = "Extrdr Steps/mm:";
+	const static PROGMEM prog_uchar message2[] = "(calib)";
+	const static PROGMEM prog_uchar message4[] = "Up/Dn/Ent to Set";
+	const static PROGMEM prog_uchar blank[]     = "  ";
+
+	if (forceRedraw) {
+		lcd.clear();
+
+		lcd.setCursor(0,0);
+		lcd.writeFromPgmspace(message1);
+
+		lcd.setCursor(0,2);
+		lcd.writeFromPgmspace(message2);
+
+		lcd.setCursor(0,3);
+		lcd.writeFromPgmspace(message4);
+	}
+
+	// Redraw tool info
+	lcd.setCursor(8,2);
+	lcd.writeFloat((float)value / 10.0,1);
+	lcd.writeFromPgmspace(blank);
+}
+
+void EStepsPerMMMode::notifyButtonPressed(ButtonArray::ButtonName button) {
+	switch (button) {
+        case ButtonArray::CANCEL:
+		interface::popScreen();
+		break;
+        case ButtonArray::ZERO:
+		break;
+        case ButtonArray::OK:
+		eeprom::putEepromUInt32(mbeeprom::ACCEL_E_STEPS_PER_MM,value);
+		//Reset to read in the new value
+		host::stopBuild();
+		return;
+		break;
+        case ButtonArray::ZPLUS:
+		// increment more
+		value += 25;
+		break;
+        case ButtonArray::ZMINUS:
+		// decrement more
+		value -= 25;
+		break;
+        case ButtonArray::YPLUS:
+		// increment less
+		value += 1;
+		break;
+        case ButtonArray::YMINUS:
+		// decrement less
+		value -= 1;
+		break;
+
+        case ButtonArray::XMINUS:
+		interface::pushScreen(&eStepsPerMMStepsMode);
+		break;
+        case ButtonArray::XPLUS:
+		break;
+	}
+
+	if (( value < 1 ) || ( value > 200000 )) value = 1;
+}
+
+void EStepsPerMMStepsMode::reset() {
+	value = 200;
+	steppers::switchToRegularDriver();
+	overrideExtrudeSeconds = 0;
+}
+
+void EStepsPerMMStepsMode::update(LiquidCrystal& lcd, bool forceRedraw) {
+	const static PROGMEM prog_uchar message1[] = "Extrude N steps:";
+	const static PROGMEM prog_uchar message2[] = "(extrude)";
+	const static PROGMEM prog_uchar message4[] = "Up/Dn/Ent to Set";
+	const static PROGMEM prog_uchar blank[]     = " ";
+
+	if (overrideExtrudeSeconds)	extrude(true);
+
+	if (forceRedraw) {
+		lcd.clear();
+
+		lcd.setCursor(0,0);
+		lcd.writeFromPgmspace(message1);
+
+		lcd.setCursor(0,2);
+		lcd.writeFromPgmspace(message2);
+
+		lcd.setCursor(0,3);
+		lcd.writeFromPgmspace(message4);
+	}
+
+	// Redraw tool info
+	lcd.setCursor(10,2);
+	lcd.writeFloat((float)value,0);
+	lcd.writeFromPgmspace(blank);
+}
+
+void EStepsPerMMStepsMode::extrude(bool overrideTempCheck) {
+	//Check we're hot enough
+	if ( ! overrideTempCheck )
+	{
+		OutPacket responsePacket;
+		if (extruderControl(SLAVE_CMD_IS_TOOL_READY, EXTDR_CMD_GET, responsePacket, 0)) {
+			uint8_t data = responsePacket.read8(1);
+		
+			if ( ! data )
+			{
+				overrideExtrudeSeconds = 1;
+				interface::pushScreen(&extruderTooColdMenu);
+				return;
+			}
+		}
+	}
+
+	Point position = steppers::getPosition();
+
+	float rpm = (float)eeprom::getEeprom8(mbeeprom::EXTRUDE_RPM, 19) / 10.0;
+
+	//60 * 1000000 = # uS in a minute
+	//200 * 8 = 200 steps per revolution * 1/8 stepping
+	int32_t interval = (int32_t)(60L * 1000000L) / (int32_t)((float)(200 * 8) * rpm);
+
+	position[3] += -value;
+	steppers::setTarget(position, interval);
+
+	if (overrideTempCheck)	overrideExtrudeSeconds = 0;
+}
+
+
+void EStepsPerMMStepsMode::notifyButtonPressed(ButtonArray::ButtonName button) {
+	switch (button) {
+        case ButtonArray::CANCEL:
+    		steppers::switchToAcceleratedDriver();
+		interface::popScreen();
+		break;
+        case ButtonArray::ZERO:
+		break;
+        case ButtonArray::OK:
+    		steppers::switchToAcceleratedDriver();
+		eStepsPerMMLengthMode.steps = value;
+		interface::pushScreen(&eStepsPerMMLengthMode);
+		break;
+        case ButtonArray::ZPLUS:
+		// increment more
+		value += 25;
+		break;
+        case ButtonArray::ZMINUS:
+		// decrement more
+		value -= 25;
+		break;
+        case ButtonArray::YPLUS:
+		// increment less
+		value += 1;
+		break;
+        case ButtonArray::YMINUS:
+		// decrement less
+		value -= 1;
+		break;
+
+        case ButtonArray::XMINUS:
+		extrude(false);
+		break;
+        case ButtonArray::XPLUS:
+		break;
+	}
+}
+
+void EStepsPerMMLengthMode::reset() {
+	value = 1;
+}
+
+void EStepsPerMMLengthMode::update(LiquidCrystal& lcd, bool forceRedraw) {
+	const static PROGMEM prog_uchar message1[] = "Enter noodle";
+	const static PROGMEM prog_uchar message2[] = "length in mm's";
+	const static PROGMEM prog_uchar message4[] = "Up/Dn/Ent to Set";
+	const static PROGMEM prog_uchar blank[]     = "  ";
+
+	if (forceRedraw) {
+		lcd.clear();
+
+		lcd.setCursor(0,0);
+		lcd.writeFromPgmspace(message1);
+
+		lcd.setCursor(0,1);
+		lcd.writeFromPgmspace(message2);
+
+		lcd.setCursor(0,3);
+		lcd.writeFromPgmspace(message4);
+	}
+
+	// Redraw tool info
+	lcd.setCursor(0,2);
+	lcd.writeFloat((float)value,0);
+	lcd.writeFromPgmspace(blank);
+}
+
+void EStepsPerMMLengthMode::notifyButtonPressed(ButtonArray::ButtonName button) {
+	uint32_t espm;
+
+	switch (button) {
+        case ButtonArray::CANCEL:
+		interface::popScreen();
+		break;
+        case ButtonArray::ZERO:
+		break;
+        case ButtonArray::OK:
+		if ( steps < 0 ) steps *= -1;
+		espm = (uint32_t)lround(((float)steps / (float)value) * 10.0);
+		eeprom::putEepromUInt32(mbeeprom::ACCEL_E_STEPS_PER_MM,espm);
+	
+		//Reset to read in the new value
+		host::stopBuild();
+		return;
+		break;
+        case ButtonArray::ZPLUS:
+		// increment more
+		value += 5;
+		break;
+        case ButtonArray::ZMINUS:
+		// decrement more
+		value -= 5;
+		break;
+        case ButtonArray::YPLUS:
+		// increment less
+		value += 1;
+		break;
+        case ButtonArray::YMINUS:
+		// decrement less
+		value -= 1;
+		break;
+
+        case ButtonArray::XMINUS:
+        case ButtonArray::XPLUS:
+		break;
+	}
+
+	if (( value < 1 ) || ( value > 200000 )) value = 1;
+}
+
+ExtruderTooColdMenu::ExtruderTooColdMenu() {
+	itemCount = 4;
+	reset();
+}
+
+void ExtruderTooColdMenu::resetState() {
+	itemIndex = 2;
+	firstItemIndex = 2;
+}
+
+void ExtruderTooColdMenu::drawItem(uint8_t index, LiquidCrystal& lcd) {
+	const static PROGMEM prog_uchar warning[]  = "Tool0 too cold!";
+	const static PROGMEM prog_uchar cancel[]   =  "Cancel";
+	const static PROGMEM prog_uchar override[] =  "Override";
+
+	switch (index) {
+	case 0:
+		lcd.writeFromPgmspace(warning);
+		break;
+	case 1:
+		break;
+	case 2:
+		lcd.writeFromPgmspace(cancel);
+		break;
+	case 3:
+		lcd.writeFromPgmspace(override);
+		break;
+	}
+}
+
+void ExtruderTooColdMenu::handleSelect(uint8_t index) {
+	switch (index) {
+	case 2:
+		// Cancel extrude
+		overrideExtrudeSeconds = 0;
+		interface::popScreen();
+		break;
+	case 3:
+		// Override and extrude
+                interface::popScreen();
+		break;
+	}
+}
+
+void StepperDriverAcceleratedMenu::handleSelect(uint8_t index) {
+	uint8_t oldValue = eeprom::getEeprom8(mbeeprom::STEPPER_DRIVER, 0);
+	uint8_t newValue = oldValue;
+	
+	switch (index) {
+		case 2:  
+			newValue = 0x00;
+			interface::popScreen();
+			break;
+		case 3:
+			newValue = 0x01;
+                	interface::popScreen();
+			break;
+		case 4:
+			newValue = 0x03;
+                	interface::popScreen();
+			break;
+	}
+
+	//If the value has changed, do a reset
+	if ( newValue != oldValue ) {
+		cli();
+		eeprom_write_byte((uint8_t*)mbeeprom::STEPPER_DRIVER, newValue);
+		sei();
+		//Reset
+		host::stopBuild();
+	}
+}
+
 
 SetupMode::SetupMode() {
-	itemCount = 10;
+	itemCount = 9;
 	reset();
+	AxisPerMM::populateAxisArray();
 }
 
 void SetupMode::drawItem(uint8_t index, LiquidCrystal& lcd) {
 	const static PROGMEM prog_uchar setupdisp[] = "Setup Display";
-	const static PROGMEM prog_uchar testkeys[]  = "Test Keys";
 	const static PROGMEM prog_uchar moodlight[] = "Mood Light";
-	const static PROGMEM prog_uchar endStops[]  = "Test End Stops";
-	const static PROGMEM prog_uchar versions[]  = "Version";
-	const static PROGMEM prog_uchar homeAxis[]  = "Home Axis";
-	const static PROGMEM prog_uchar mbprefs[]   = "MB Prefs ";
-	const static PROGMEM prog_uchar thprefs[]   = "Toolhead Prefs";
-	const static PROGMEM prog_uchar calibrate[] = "Calibrate";
-	const static PROGMEM prog_uchar homeOffsets[]="Home Offsets";
+	const static PROGMEM prog_uchar buzzer[]	  = "Buzzer";
+	const static PROGMEM prog_uchar item1[] 		= "EstimatePreheat";
+	const static PROGMEM prog_uchar item2[] 		= "Override Temp";
+	const static PROGMEM prog_uchar item3[] 		= "ABP Copies (SD)";
+	const static PROGMEM prog_uchar item4[] 		= "Acceleration";
+	const static PROGMEM prog_uchar mbprefs[]   = "MB Prefs   > X+";
+	const static PROGMEM prog_uchar utilsmenu[] = "Utils Menu < X-";
 
 	switch (index) {
 	case 0:
 		lcd.writeFromPgmspace(setupdisp);
 		break;
-	case 1:
-		lcd.writeFromPgmspace(testkeys);
-		break;
-	case 2:
-		lcd.writeFromPgmspace(homeAxis);
-		break;
-  case 3:
+  case 1:
 		lcd.writeFromPgmspace(moodlight);
 		break;
+	case 2:
+		lcd.writeFromPgmspace(buzzer);
+		break;
+	case 3:
+		lcd.writeFromPgmspace(item1);
+		break;
 	case 4:
-		lcd.writeFromPgmspace(endStops);
+		lcd.writeFromPgmspace(item2);
 		break;
 	case 5:
-		lcd.writeFromPgmspace(versions);
+		lcd.writeFromPgmspace(item3);
 		break;
 	case 6:
-		lcd.writeFromPgmspace(mbprefs);
+		lcd.writeFromPgmspace(item4);
 		break;
 	case 7:
-		lcd.writeFromPgmspace(thprefs);
+		lcd.writeFromPgmspace(mbprefs);
 		break;
 	case 8:
-		lcd.writeFromPgmspace(calibrate);
+		lcd.writeFromPgmspace(utilsmenu);
 		break;
-	case 9:
-		lcd.writeFromPgmspace(homeOffsets);
-		break;
+	}
+}
+
+void SetupMode::handleButtonPressed(ButtonArray::ButtonName button,uint8_t index, uint8_t subIndex) {
+	switch (button) {
+		case ButtonArray::XPLUS:
+			interface::pushScreen(&mbPrefMenu);
+			break;
+		case ButtonArray::XMINUS:
+			interface::popScreen();
+			break;
 	}
 }
 
@@ -891,37 +1204,33 @@ void SetupMode::handleSelect(uint8_t index) {
 			break;
 		case 1:
 			// Key Test
-			interface::pushScreen(&test);
+			interface::pushScreen(&moodLightMode);
 			break;
 		case 2:
 			// Show home axis
-			interface::pushScreen(&homeAxisMode);
+			interface::pushScreen(&buzzerSetRepeats);
 			break;
 	  case 3:
-			// Show Mood Light Mode
-      interface::pushScreen(&moodLightMode);
+			//Preheat during estimation
+			interface::pushScreen(&preheatDuringEstimateMenu);
 			break;
 		case 4:
-			// Show test end stops menu
-			interface::pushScreen(&testEndStopsMode);
+			//Override the gcode temperature
+			interface::pushScreen(&overrideGCodeTempMenu);
 			break;
 		case 5:
-			// Show build from SD screen
-      interface::pushScreen(&versionMode);
+			//Change number of ABP copies
+			interface::pushScreen(&abpCopiesSetScreen);
 			break;
 		case 6:
-			interface::pushScreen(&mbPrefMenu);
+			//Acceleration menu
+			interface::pushScreen(&accelerationMenu);
 			break;
 		case 7:
-			interface::pushScreen(&notyetimplemented);
+      interface::pushScreen(&mbPrefMenu);
 			break;
 		case 8:
-			// Show Calibrate Mode
-      interface::pushScreen(&calibrateMode);
-			break;
-		case 9:
-			// Show Home Offsets Mode
-      interface::pushScreen(&homeOffsetsMode);
-			break;
+      interface::popScreen();
+			break;	
 		}
 }

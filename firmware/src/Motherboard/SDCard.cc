@@ -108,16 +108,18 @@ SdErrorCode initCard() {
 }
 
 SdErrorCode directoryReset() {
-  reset();
-  SdErrorCode rsp = initCard();
-  if (rsp != SD_SUCCESS && rsp != SD_ERR_CARD_LOCKED) {
-    return rsp;
-  }
+
+  	reset();
+  	SdErrorCode rsp = initCard();
+  	if (rsp != SD_SUCCESS && rsp != SD_ERR_CARD_LOCKED) {
+    	return rsp;
+  	}
+
   fat_reset_dir(dd);
   return SD_SUCCESS;
 }
 
-SdErrorCode directoryNextEntry(char* buffer, uint8_t bufsize) {
+SdErrorCode directoryNextEntry(char* buffer, uint8_t bufsize,uint8_t fileAttrib, uint8_t* fileLength) {
 	struct fat_dir_entry_struct entry;
 	// This is a bit of a hack.  For whatever reason, some filesystems return
 	// files with nulls as the first character of their name.  This isn't
@@ -129,14 +131,17 @@ SdErrorCode directoryNextEntry(char* buffer, uint8_t bufsize) {
 	while (tries) {
 		if (fat_read_dir(dd, &entry)) {
 			//Ignore non-file, system or hidden files
-			if ( entry.attributes & (FAT_ATTRIB_HIDDEN | FAT_ATTRIB_SYSTEM | FAT_ATTRIB_VOLUME | FAT_ATTRIB_DIR ))
+			if ( (entry.attributes & fileAttrib) || (!(fileAttrib & FAT_ATTRIB_DIR) && !(entry.attributes & FAT_ATTRIB_DIR)))
 				continue;
+			
 			int i;
 			for (i = 0; (i < bufsize-1) && entry.long_name[i] != 0; i++) {
 				buffer[i] = entry.long_name[i];
 			}
 			buffer[i] = 0;
 			if (i > 0) {
+				if(fileLength != 0)
+					*fileLength = i;
 				break;
 			} else {
 				tries--;
@@ -149,6 +154,14 @@ SdErrorCode directoryNextEntry(char* buffer, uint8_t bufsize) {
 	return SD_SUCCESS;
 }
 
+SdErrorCode directoryNextDirEntry(char* buffer, uint8_t bufsize,uint8_t* fileLength) {
+	return directoryNextEntry(buffer,bufsize,(FAT_ATTRIB_HIDDEN | FAT_ATTRIB_SYSTEM | FAT_ATTRIB_VOLUME),fileLength);
+}
+
+SdErrorCode directoryNextEntry(char* buffer, uint8_t bufsize,uint8_t* fileLength) {
+	return directoryNextEntry(buffer,bufsize,(FAT_ATTRIB_HIDDEN | FAT_ATTRIB_SYSTEM | FAT_ATTRIB_VOLUME | FAT_ATTRIB_DIR),fileLength);
+}
+
 bool findFileInDir(const char* name, struct fat_dir_entry_struct* dir_entry)
 {
   while(fat_read_dir(dd, dir_entry))
@@ -158,6 +171,23 @@ bool findFileInDir(const char* name, struct fat_dir_entry_struct* dir_entry)
       fat_reset_dir(dd);
       return true;
     }
+  }
+  return false;
+}
+
+bool cd(const char* name)
+{
+	struct fat_dir_entry_struct dirEntry;
+  if(!findFileInDir(name, &dirEntry)) {
+    return false;
+  }
+  
+  struct fat_dir_struct* dd_new = fat_open_dir(fs, &dirEntry);
+  
+  if(dd_new) {
+    fat_close_dir(dd);
+    dd = dd_new;
+    return true;
   }
   return false;
 }
@@ -259,10 +289,17 @@ uint32_t finishCapture()
 uint8_t next_byte;
 bool has_more;
 
-void fetchNextByte() {
+SdErrorCode fetchNextByte() {
+  if(sd_raw_available()){
   int16_t read = fat_read_file(file, &next_byte, 1);
   has_more = read > 0;
   playedBytes++;
+	}
+  else{
+	has_more = 0;
+	return SD_ERR_NO_CARD_PRESENT;
+	}
+	return SD_SUCCESS;
 }
 
 bool playbackHasNext() {
@@ -300,8 +337,7 @@ SdErrorCode startPlayback(char* filename) {
 
   Motherboard::getBoard().resetCurrentSeconds();
 
-  fetchNextByte();
-  return SD_SUCCESS;
+  return fetchNextByte();
 }
 
 float getPercentPlayed() {
@@ -310,6 +346,17 @@ float getPercentPlayed() {
   if      ( percentPlayed > 100.0 )	return 100.0;
   else if ( percentPlayed < 0.0 )	return 0.0;
   else					return percentPlayed;
+}
+
+void playbackRestart() {
+  capturedBytes = 0L;
+  playedBytes = 0L;
+  playing = true;
+
+  int32_t offset = 0;	
+  fat_seek_file(file, &offset, FAT_SEEK_SET);
+
+  fetchNextByte();
 }
 
 void playbackRewind(uint8_t bytes) {

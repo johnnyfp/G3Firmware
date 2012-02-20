@@ -17,6 +17,7 @@
 
 #ifndef MAIN_HH_
 #define MAIN_HH_
+#define MOTHERBOARD
 
 /// Reset the machine.
 /// \param[in] hard_reset Pass in true if this is a power-up reset

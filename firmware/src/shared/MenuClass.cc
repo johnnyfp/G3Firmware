@@ -13,8 +13,8 @@
 #include <util/delay.h>
 #include <stdlib.h>
 #include "SDCard.hh"
-#include "EepromMap.hh"
-#include "Eeprom.hh"
+#include "SharedEepromMap.hh"
+#include "eeprom.hh"
 #include <avr/eeprom.h>
 #include "ExtruderControl.hh"
 
@@ -75,6 +75,9 @@ void Menu::handleSelect(uint8_t index) {
 void Menu::handleSelectSub(uint8_t index,uint8_t subIndex) {
 }
 
+void Menu::handleButtonPressed(ButtonArray::ButtonName button,uint8_t index, uint8_t subIndex){
+}
+
 void Menu::drawItemSub(uint8_t index, uint8_t subIndex, LiquidCrystal& lcd) {
 }
 
@@ -122,4 +125,5 @@ void Menu::notifyButtonPressed(ButtonArray::ButtonName button) {
     	if (subItemIndex>lastSubItemIndex) subItemIndex=firstSubItemIndex;
     	break;
 	}
+	handleButtonPressed(button,itemIndex,subItemIndex);
 }

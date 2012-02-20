@@ -26,8 +26,8 @@
 #include "Steppers.hh"
 #include "Motherboard.hh"
 #include "SDCard.hh"
-#include "Eeprom.hh"
-#include "EepromMap.hh"
+#include "SharedEepromMap.hh"
+#include "eeprom.hh"
 #include "Errors.hh"
 
 
@@ -37,20 +37,20 @@
 volatile bool atxLastPowerGood;
 #endif
 
-
 void reset(bool hard_reset) {
 	ATOMIC_BLOCK(ATOMIC_FORCEON) {
 		Motherboard& board = Motherboard::getBoard();
 		sdcard::reset();
 		steppers::abort();
+  	steppers::reset();
 		command::reset();
 		eeprom::init();
-		board.reset();
+		board.reset(hard_reset);
 #ifdef HAS_ESTOP
-		const uint8_t estop_conf = eeprom::getEeprom8(eeprom::ESTOP_CONFIGURATION, 0);
-		if (estop_conf == eeprom::ESTOP_CONF_ACTIVE_HIGH) {
+		const uint8_t estop_conf = eeprom::getEeprom8(mbeeprom::ESTOP_CONFIGURATION, 0);
+		if (estop_conf == mbeeprom::ESTOP_CONF_ACTIVE_HIGH) {
 			ESTOP_ENABLE_RISING_INT;
-		} else if (estop_conf == eeprom::ESTOP_CONF_ACTIVE_LOW) {
+		} else if (estop_conf == mbeeprom::ESTOP_CONF_ACTIVE_LOW) {
 			ESTOP_ENABLE_FALLING_INT;
 		}
 #endif
@@ -103,6 +103,7 @@ int main() {
 		/// reset
 		bool powerGood = ATX_POWER_GOOD.getValue();
 		if (( ! atxLastPowerGood ) && ( powerGood )) {
+			host::resetBuild();
 			reset(true);
 		}
 		atxLastPowerGood = powerGood;
@@ -122,7 +123,8 @@ ISR(ESTOP_vect, ISR_NOBLOCK) {
 	command::reset();
 	UART::getHostUART().enable(false);
 	Motherboard::getBoard().indicateError(ERR_ESTOP);
-  
+  Motherboard::getBoard().buzz(7, 10, eeprom::getEeprom8(mbeeprom::BUZZER_REPEATS, 3));
+
 }
 #endif
 

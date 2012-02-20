@@ -27,7 +27,8 @@
 #include "Version.hh"
 #include "MotorController.hh"
 #include "Main.hh"
-#include "EepromMap.hh"
+#include "SharedEepromMap.hh"
+#include "eeprom.hh"
 
 // Timeout from time first bit recieved until we abort packet reception
 Timeout packet_in_timeout;

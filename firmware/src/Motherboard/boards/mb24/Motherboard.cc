@@ -26,8 +26,8 @@
 #include "Interface.hh"
 #include "Tool.hh"
 #include "Commands.hh"
-#include "Eeprom.hh"
-#include "EepromMap.hh"
+#include "SharedEepromMap.hh"
+#include "eeprom.hh"
 #include <avr/eeprom.h>
 
 /// Instantiate static motherboard instance
@@ -58,7 +58,7 @@ Motherboard::Motherboard() :
                                       X_ENABLE_PIN,
                                       X_MAX_PIN,
                                       X_MIN_PIN,
-                                      eeprom::AXIS_INVERSION);
+                                      mbeeprom::AXIS_INVERSION);
 #endif
 #if STEPPER_COUNT > 1
         stepper[1] = StepperInterface(Y_DIR_PIN,
@@ -66,7 +66,7 @@ Motherboard::Motherboard() :
                                       Y_ENABLE_PIN,
                                       Y_MAX_PIN,
                                       Y_MIN_PIN,
-                                      eeprom::AXIS_INVERSION);
+                                      mbeeprom::AXIS_INVERSION);
 #endif
 #if STEPPER_COUNT > 2
         stepper[2] = StepperInterface(Z_DIR_PIN,
@@ -74,7 +74,7 @@ Motherboard::Motherboard() :
                                       Z_ENABLE_PIN,
                                       Z_MAX_PIN,
                                       Z_MIN_PIN,
-                                      eeprom::AXIS_INVERSION);
+                                      mbeeprom::AXIS_INVERSION);
 #endif
 #if STEPPER_COUNT > 3
         stepper[3] = StepperInterface(A_DIR_PIN,
@@ -82,7 +82,7 @@ Motherboard::Motherboard() :
                                       A_ENABLE_PIN,
                                       Pin(),
                                       Pin(),
-                                      eeprom::AXIS_INVERSION);
+                                      mbeeprom::AXIS_INVERSION);
 #endif
 #if STEPPER_COUNT > 4
         stepper[4] = StepperInterface(B_DIR_PIN,
@@ -90,20 +90,49 @@ Motherboard::Motherboard() :
                                       B_ENABLE_PIN,
                                       Pin(),
                                       Pin(),
-                                      eeprom::AXIS_INVERSION);
+                                      mbeeprom::AXIS_INVERSION);
 #endif
 }
+
+void Motherboard::setupFixedStepperTimer() {
+	TCCR1A = 0x00;
+	TCCR1B = 0x09;
+	TCCR1C = 0x00;
+	OCR1A = INTERVAL_IN_MICROSECONDS * 16;
+	TIMSK1 = 0x02; // turn on OCR1A match interrupt
+}
+
+void Motherboard::setupAccelStepperTimer() {
+  // waveform generation = 0100 = CTC
+  TCCR1B &= ~(1<<WGM13);
+  TCCR1B |=  (1<<WGM12);
+  TCCR1A &= ~(1<<WGM11);
+  TCCR1A &= ~(1<<WGM10);
+
+  // output mode = 00 (disconnected)
+  TCCR1A &= ~(3<<COM1A0);
+  TCCR1A &= ~(3<<COM1B0);
+  TCCR1B = (TCCR1B & ~(0x07<<CS10)) | (2<<CS10); // 2MHz timer
+
+  OCR1A = 0x4000;
+  TCNT1 = 0;
+  TIMSK1 |= (1<<OCIE1A);	//Enable interrupt
+}
+
+
 
 /// Reset the motherboard to its initial state.
 /// This only resets the board, and does not send a reset
 /// to any attached toolheads.
-void Motherboard::reset() {
+void Motherboard::reset(bool hard_reset) {
+
 	indicateError(0); // turn off blinker
 
-	moodLightController.start();
+	if ( hard_reset )	moodLightController.start();
+
 
 	// Init steppers
-	uint8_t axis_invert = eeprom::getEeprom8(eeprom::AXIS_INVERSION, 0);
+	uint8_t axis_invert = eeprom::getEeprom8(mbeeprom::AXIS_INVERSION, 0);
 	// Z holding indicates that when the Z axis is not in
 	// motion, the machine should continue to power the stepper
 	// coil to ensure that the Z stage does not shift.
@@ -124,15 +153,36 @@ void Motherboard::reset() {
         UART::getSlaveUART().in.reset();
 	// Reset and configure timer 1, the microsecond and stepper
 	// interrupt timer.
-	TCCR1A = 0x00;
-	TCCR1B = 0x09;
-	TCCR1C = 0x00;
-	OCR1A = INTERVAL_IN_MICROSECONDS * 16;
-	TIMSK1 = 0x02; // turn on OCR1A match interrupt
+	setupFixedStepperTimer();
+
+	
 	// Reset and configure timer 2, the debug LED flasher timer.
 	TCCR2A = 0x00;
 	TCCR2B = 0x07; // prescaler at 1/1024
 	TIMSK2 = 0x01; // OVF flag on
+	
+		// Reset and configure timer 3, the microsecond and interface
+	// interrupt timer.
+	TCCR3A = 0x00;
+	TCCR3B = 0x0B; //Prescaler = 64
+	TCCR3C = 0x00;
+	OCR3A  = INTERVAL_IN_MICROSECONDS * 16;
+	TIMSK3 = 0x02; // turn on OCR3A match interrupt
+
+	// Reset and configure timer 4, the accelerated "ADVANCE" timer
+	// interrupt timer.
+	TCCR4A = 0x00;
+	TCCR4B = 0x09;
+	TCCR4C = 0x00;
+	OCR4A  = 100 * 16;
+	TIMSK4 = 0x02; // turn on OCR4A match interrupt
+
+	
+	buzzerRepeats  = 0;
+  buzzerDuration = 0.0;
+  buzzerState    = BUZZ_STATE_NONE;
+	BUZZER_PIN.setDirection(false);
+
 	// Configure the debug pin.
 	DEBUG_PIN.setDirection(true);
 
@@ -141,21 +191,22 @@ void Motherboard::reset() {
 	ESTOP_PIN.setDirection(false);
 #endif
 
+	steppers::reset();
 
 	// Check if the interface board is attached
 	hasInterfaceBoard = true;//interfaceboard::isConnected();
 
 	if (hasInterfaceBoard) {
 		// Make sure our interface board is initialized
-                interfaceBoard.init();
+    interfaceBoard.init();
 
-                // Then add the splash screen to it.
-                interfaceBoard.pushScreen(&splashScreen);
+    // Then add the splash screen to it.
+    interfaceBoard.pushScreen(&splashScreen);
 
-                // Finally, set up the *** interface
-                interface::init(&interfaceBoard, &lcd);
+    // Finally, set up the *** interface
+    interface::init(&interfaceBoard, &lcd);
 
-                interface_update_timeout.start(interfaceBoard.getUpdateRate());
+    interface_update_timeout.start(interfaceBoard.getUpdateRate());
 	}
 
         // Blindly try to reset the toolhead with index 0.
@@ -164,10 +215,10 @@ void Motherboard::reset() {
 
 /// Get the number of microseconds that have passed since
 /// the board was booted.
-micros_t Motherboard::getCurrentMicros() {
+	micros_t Motherboard::getCurrentMicros() {
 	micros_t micros_snapshot;
 	ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
-		micros_snapshot = micros;
+	micros_snapshot = micros;
 	}
 	return micros_snapshot;
 }
@@ -193,21 +244,30 @@ void Motherboard::resetCurrentSeconds() {
   }
 }
 
+/// Run the stepper interrupt
+
+void Motherboard::doStepperInterrupt() {
+	steppers::doInterrupt();
+}
+
+void Motherboard::doAdvanceInterrupt() {
+	steppers::doAdvanceInterrupt();
+}
+
 
 /// Run the motherboard interrupt
-void Motherboard::doInterrupt() {
+void Motherboard::doInterfaceInterrupt() {
 	if (hasInterfaceBoard) {
                 interfaceBoard.doInterrupt();
 	}
-	micros += INTERVAL_IN_MICROSECONDS;
-	countupMicros += INTERVAL_IN_MICROSECONDS;
+	micros += (INTERVAL_IN_MICROSECONDS * 64);
+	countupMicros += (INTERVAL_IN_MICROSECONDS * 64);	//64 because we're using a 64 prescaler on timer 3
 	while (countupMicros > 1000000L) {
 		seconds += 1;
 		countupMicros -= 1000000L;
 	}
-
-	steppers::doInterrupt();
 }
+
 
 void Motherboard::runMotherboardSlice() {
 	if (hasInterfaceBoard) {
@@ -216,6 +276,8 @@ void Motherboard::runMotherboardSlice() {
                         interface_update_timeout.start(interfaceBoard.getUpdateRate());
 		}
 	}
+	
+	serviceBuzzer();
 }
 
 MoodLightController Motherboard::getMoodLightController() {
@@ -225,8 +287,19 @@ MoodLightController Motherboard::getMoodLightController() {
 
 /// Timer one comparator match interrupt
 ISR(TIMER1_COMPA_vect) {
-	Motherboard::getBoard().doInterrupt();
+		Motherboard::getBoard().doStepperInterrupt();
 }
+
+/// Timer one comparator match interrupt
+ISR(TIMER3_COMPA_vect) {
+	Motherboard::getBoard().doInterfaceInterrupt();
+}
+
+/// Timer one comparator match interrupt
+ISR(TIMER4_COMPA_vect) {
+	Motherboard::getBoard().doAdvanceInterrupt();
+}
+
 
 /// Number of times to blink the debug LED on each cycle
 volatile uint8_t blink_count = 0;
@@ -258,9 +331,9 @@ uint8_t Motherboard::getCurrentError() {
 
 void Motherboard::MoodLightSetRGBColor(uint8_t r, uint8_t g, uint8_t b, uint8_t fadeSpeed, uint8_t writeToEeprom) {
 	if ( writeToEeprom ) {
-		eeprom_write_byte((uint8_t*)eeprom::MOOD_LIGHT_CUSTOM_RED,  r);
-		eeprom_write_byte((uint8_t*)eeprom::MOOD_LIGHT_CUSTOM_GREEN,g);
-		eeprom_write_byte((uint8_t*)eeprom::MOOD_LIGHT_CUSTOM_BLUE, b);
+		eeprom_write_byte((uint8_t*)mbeeprom::MOOD_LIGHT_CUSTOM_RED,  r);
+		eeprom_write_byte((uint8_t*)mbeeprom::MOOD_LIGHT_CUSTOM_GREEN,g);
+		eeprom_write_byte((uint8_t*)mbeeprom::MOOD_LIGHT_CUSTOM_BLUE, b);
 	} else {
 		moodLightController.blinkM.setFadeSpeed(fadeSpeed);
 		moodLightController.blinkM.fadeToRGB(r,g,b);
@@ -273,8 +346,81 @@ void Motherboard::MoodLightSetHSBColor(uint8_t r, uint8_t g, uint8_t b, uint8_t 
 }
 
 void Motherboard::MoodLightPlayScript(uint8_t scriptId, uint8_t writeToEeprom) {
-	if ( writeToEeprom ) eeprom_write_byte((uint8_t*)eeprom::MOOD_LIGHT_SCRIPT,scriptId);
+	if ( writeToEeprom ) eeprom_write_byte((uint8_t*)mbeeprom::MOOD_LIGHT_SCRIPT,scriptId);
 	moodLightController.playScript(scriptId);
+}
+
+
+//Duration is the length of each buzz in 1/10secs
+//Issue "repeats = 0" to kill a current buzzing
+
+void Motherboard::buzz(uint8_t buzzes, uint8_t duration, uint8_t repeats) {
+	if ( repeats == 0 ) {
+		buzzerState = BUZZ_STATE_NONE;
+		return;
+	}
+
+	buzzerBuzzes	  = buzzes;
+	buzzerBuzzesReset = buzzes;
+	buzzerDuration	  = (float)duration / 10.0;	
+	buzzerRepeats	  = repeats;
+
+	BUZZER_PIN.setDirection(true);
+	buzzerState = BUZZ_STATE_MOVE_TO_ON;
+}
+
+void Motherboard::stopBuzzer() {
+	buzzerState = BUZZ_STATE_NONE;
+
+	BUZZER_PIN.setValue(false);
+	BUZZER_PIN.setDirection(false);
+}
+
+void Motherboard::serviceBuzzer() {
+	if ( buzzerState == BUZZ_STATE_NONE )	return;
+
+	float currentSeconds = getCurrentSeconds();
+
+	switch (buzzerState)
+	{
+		case BUZZ_STATE_BUZZ_ON:
+			if ( currentSeconds >= buzzerSecondsTarget )
+				buzzerState = BUZZ_STATE_MOVE_TO_OFF;
+			break;
+		case BUZZ_STATE_MOVE_TO_OFF:
+			buzzerBuzzes --;
+			BUZZER_PIN.setValue(false);
+			buzzerSecondsTarget = currentSeconds + buzzerDuration;
+			buzzerState = BUZZ_STATE_BUZZ_OFF;
+			break;
+		case BUZZ_STATE_BUZZ_OFF:
+			if ( currentSeconds >= buzzerSecondsTarget ) {
+				if ( buzzerBuzzes == 0 ) {
+					buzzerRepeats --;
+					if ( buzzerRepeats == 0 )	stopBuzzer();
+					else				buzzerState = BUZZ_STATE_MOVE_TO_DELAY;
+				} else	buzzerState = BUZZ_STATE_MOVE_TO_ON;
+			}
+			break;
+		case BUZZ_STATE_MOVE_TO_ON:
+			BUZZER_PIN.setValue(true);
+			buzzerSecondsTarget = currentSeconds + buzzerDuration;
+			buzzerState = BUZZ_STATE_BUZZ_ON;
+			break;
+		case BUZZ_STATE_MOVE_TO_DELAY:
+			BUZZER_PIN.setValue(false);
+			buzzerSecondsTarget = currentSeconds + buzzerDuration * 3;
+			buzzerState = BUZZ_STATE_BUZZ_DELAY;
+			break;
+		case BUZZ_STATE_BUZZ_DELAY:
+			if ( currentSeconds >= buzzerSecondsTarget ) {
+				buzzerBuzzes = buzzerBuzzesReset;
+				buzzerSecondsTarget = currentSeconds + buzzerDuration;
+				BUZZER_PIN.setValue(true);
+				buzzerState = BUZZ_STATE_BUZZ_ON;
+			}
+			break;
+	}
 }
 
 

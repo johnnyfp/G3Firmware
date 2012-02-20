@@ -19,9 +19,8 @@
 #include "Heater.hh"
 #include "HeatingElement.hh"
 #include "Thermistor.hh"
-//#include "ExtruderBoard.hh"
-#include "Eeprom.hh"
-#include "EepromMap.hh"
+#include "SharedEepromMap.hh"
+#include "eeprom.hh"
 
 #define DEFAULT_P 7.0
 #define DEFAULT_I 0.325

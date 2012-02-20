@@ -21,8 +21,8 @@
 #include "MotorController.hh"
 #include "Configuration.hh"
 #include "CoolingFan.hh"
-#include "Eeprom.hh"
-#include "EepromMap.hh"
+#include "SharedEepromMap.hh"
+#include "eeprom.hh"
 
 #include <avr/interrupt.h>
 #include <util/atomic.h>
@@ -35,12 +35,12 @@ ExtruderBoard::ExtruderBoard() :
 		micros(0L),
 		extruder_thermocouple(THERMOCOUPLE_CS,THERMOCOUPLE_SCK,THERMOCOUPLE_SO),
 		platform_thermistor(PLATFORM_PIN,1),
-                extruder_heater(extruder_thermocouple,extruder_element,SAMPLE_INTERVAL_MICROS_THERMOCOUPLE,eeprom::EXTRUDER_PID_BASE),
-                platform_heater(platform_thermistor,platform_element,SAMPLE_INTERVAL_MICROS_THERMISTOR,eeprom::HBP_PID_BASE),
+                extruder_heater(extruder_thermocouple,extruder_element,SAMPLE_INTERVAL_MICROS_THERMOCOUPLE,extrudereeprom::EXTRUDER_PID_BASE),
+                platform_heater(platform_thermistor,platform_element,SAMPLE_INTERVAL_MICROS_THERMISTOR,extrudereeprom::HBP_PID_BASE),
 		using_platform(true),
 		servoA(SERVO0),
 		servoB(SERVO1),
-		coolingFan(extruder_heater, eeprom::COOLING_FAN_BASE)
+		coolingFan(extruder_heater, extrudereeprom::COOLING_FAN_BASE)
 {
 }
 
@@ -145,7 +145,7 @@ void ExtruderBoard::reset(uint8_t resetFlags) {
 
 	//        flashIndicatorLED();
 
-	slave_id = eeprom::getEeprom8(eeprom::SLAVE_ID, 0);
+	slave_id = eeprom::getEeprom8(extrudereeprom::SLAVE_ID, 0);
 
 	motor_controller.reset();
 }

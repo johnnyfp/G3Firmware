@@ -15,8 +15,8 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>
  */
 
-#include "EepromMap.hh"
-#include "Eeprom.hh"
+#include "SharedEepromMap.hh"
+#include "eeprom.hh"
 #include <avr/eeprom.h>
 
 namespace eeprom {
@@ -24,11 +24,11 @@ namespace eeprom {
 void setDefaults() {
         // Initialize eeprom map
         // Default: Heaters 0 and 1 enabled, thermistor on both.
-        uint8_t features = eeprom::HEATER_0_PRESENT |
-                        eeprom::HEATER_0_THERMISTOR |
-                        eeprom::HEATER_1_PRESENT |
-                        eeprom::HEATER_1_THERMISTOR;
-        eeprom_write_byte((uint8_t*)eeprom::FEATURES,features);
+        uint8_t features = mbeeprom::HEATER_0_PRESENT |
+                        mbeeprom::HEATER_0_THERMISTOR |
+                        mbeeprom::HEATER_1_PRESENT |
+                        mbeeprom::HEATER_1_THERMISTOR;
+        eeprom_write_byte((uint8_t*)mbeeprom::FEATURES,features);
 }
 
 } // namespace eeprom

@@ -72,11 +72,39 @@ private:
         SplashScreen splashScreen;      ///< Displayed at startup
         MonitorMode monitorMode;        ///< Displayed during build
 
+	bool buzzOn;
+	uint8_t buzzerRepeats;
+	uint8_t buzzerBuzzes;
+	uint8_t buzzerBuzzesReset;
+	float buzzerDuration;
+	float buzzerSecondsTarget;
+
+	enum BuzzerState {
+		BUZZ_STATE_NONE = 0,
+		BUZZ_STATE_MOVE_TO_ON,
+		BUZZ_STATE_BUZZ_ON,
+		BUZZ_STATE_MOVE_TO_OFF,
+		BUZZ_STATE_BUZZ_OFF,
+		BUZZ_STATE_MOVE_TO_DELAY,
+		BUZZ_STATE_BUZZ_DELAY
+	};
+
+	enum BuzzerState buzzerState;
+
+	void serviceBuzzer();
+
+
 public:
+	//2 types of stepper timers depending on if we're using accelerated or not
+	void setupFixedStepperTimer();
+	void setupAccelStepperTimer();
+
+
 	/// Reset the motherboard to its initial state.
 	/// This only resets the board, and does not send a reset
 	/// to any attached toolheads.
-	void reset();
+	void reset(bool hard_reset);
+
 
 	void runMotherboardSlice();
 
@@ -87,6 +115,12 @@ public:
 	{
 		return stepper[n];
 	}
+	
+  StepperInterface *getStepperAllInterfaces()
+	{
+		return stepper;
+	}
+
 
 	/// Get the number of microseconds that have passed since
 	/// the board was initialized.  This value will wrap after
@@ -100,13 +134,23 @@ public:
 	/// Get the current error being displayed.
 	uint8_t getCurrentError();
 
-	/// Perform the timer interrupt routine.
-	void doInterrupt();
+	/// Perform the stepper timer interrupt routine.
+	void doStepperInterrupt();
+
+	void doAdvanceInterrupt();
+
+	/// Perform the interface timer interrupt routine.
+	void doInterfaceInterrupt();
+
  
 	MoodLightController getMoodLightController();
 	void MoodLightSetRGBColor(uint8_t r, uint8_t g, uint8_t b, uint8_t fadeSpeed, uint8_t writeToEeprom);
 	void MoodLightSetHSBColor(uint8_t r, uint8_t g, uint8_t b, uint8_t fadeSpeed);
 	void MoodLightPlayScript(uint8_t scriptId, uint8_t writeToEeprom);
+	
+	void buzz(uint8_t buzzes, uint8_t duration, uint8_t repeats);
+	void stopBuzzer();
+	void errorResponse(char msg[]);
 };
 
 #endif // BOARDS_MB24_MOTHERBOARD_HH_

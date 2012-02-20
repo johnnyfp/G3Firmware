@@ -17,8 +17,8 @@
 
 #include "MotorController.hh"
 #include "ExtruderBoard.hh"
-#include "Eeprom.hh"
-#include "EepromMap.hh"
+#include "SharedEepromMap.hh"
+#include "eeprom.hh"
 
 MotorController::MotorController() {
 	reset();

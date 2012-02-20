@@ -22,8 +22,8 @@
 #include "ExtruderMotor.hh"
 #include "ThermistorTable.hh"
 #include <avr/interrupt.h>
-#include "Eeprom.hh"
-#include "EepromMap.hh"
+#include "SharedEepromMap.hh"
+#include "eeprom.hh"
 #include "ExtruderBoard.hh"
 #include "MotorController.hh"
 

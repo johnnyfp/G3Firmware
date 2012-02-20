@@ -1,6 +1,6 @@
 
 /*
- * Copyright (c) 2006-2010 by Roland Riegel <feedback@roland-riegel.de>
+ * Copyright (c) 2006-2011 by Roland Riegel <feedback@roland-riegel.de>
  *
  * This file is free software; you can redistribute it and/or modify
  * it under the terms of either the GNU General Public License version 2
@@ -12,8 +12,8 @@
 #define SD_RAW_CONFIG_H
 
 #include <stdint.h>
-#include "Configuration.hh"
-#include "Pin.hh"
+#include "Configuration.hh" /*MB Changed*/
+#include "Pin.hh"           /*MB Changed*/
 
 #ifdef __cplusplus
 extern "C"
@@ -91,7 +91,7 @@ extern "C"
     #define unselect_card() PORTB |= (1 << PORTB2)
 #elif defined(__AVR_ATmega16__) || \
       defined(__AVR_ATmega32__) || \
-      defined(__AVR_ATmega644P__)
+      defined(__AVR_ATmega644P__) /*MB Changed*/
     #define configure_pin_mosi() DDRB |= (1 << DDB5)
     #define configure_pin_sck() DDRB |= (1 << DDB7)
     #define configure_pin_ss() DDRB |= (1 << DDB4)
@@ -102,8 +102,9 @@ extern "C"
 #elif defined(__AVR_ATmega64__) || \
       defined(__AVR_ATmega128__) || \
       defined(__AVR_ATmega169__) || \
-	  defined(__AVR_ATmega1280__) || \
-	  defined(__AVR_ATmega2560__)
+	  defined(__AVR_ATmega1280__) || \ 
+	  defined(__AVR_ATmega2560__)     
+	   /*MB Changed*/
     #define configure_pin_mosi() DDRB |= (1 << DDB2)
     #define configure_pin_sck() DDRB |= (1 << DDB1)
     #define configure_pin_ss() DDRB |= (1 << DDB0)
@@ -115,11 +116,11 @@ extern "C"
     #error "no sd/mmc pin mapping available!"
 #endif
 
-#define configure_pin_available() SD_DETECT_PIN.setDirection(false)
-#define configure_pin_locked() SD_WRITE_PIN.setDirection(false)
+#define configure_pin_available() SD_DETECT_PIN.setDirection(false) /*MB Changed*/
+#define configure_pin_locked() SD_WRITE_PIN.setDirection(false)    /*MB Changed*/
 
-#define get_pin_available() SD_DETECT_PIN.getValue()
-#define get_pin_locked() !SD_WRITE_PIN.getValue()
+#define get_pin_available() SD_DETECT_PIN.getValue()               /*MB Changed*/
+#define get_pin_locked() !SD_WRITE_PIN.getValue()                  /*MB Changed*/
 
 #if SD_RAW_SDHC
     typedef uint64_t offset_t;

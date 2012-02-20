@@ -14,7 +14,7 @@
 #include <stdlib.h>
 #include "SDCard.hh"
 #include "SharedEepromMap.hh"
-#include "Eeprom.hh"
+#include "eeprom.hh"
 #include <avr/eeprom.h>
 #include "ExtruderControl.hh"
 
@@ -32,237 +32,315 @@ double floor(double x)
 	return (int)(x-0.9999999999999999);
 }
 
-MBMenu::MBMenu() {
-	itemCount = 12;
-	reset();
+
+
+
+/* For Debugging code
+void DisplaySteps::reset() {
 }
 
-void MBMenu::drawItem(uint8_t index, LiquidCrystal& lcd) {
-	const static PROGMEM prog_uchar item1[]  = "Machine Name    ";
-	const static PROGMEM prog_uchar item2[]  = "Invert Axis     ";
-	const static PROGMEM prog_uchar item3[]  = "E-Stop Installed";
-	const static PROGMEM prog_uchar item4[]  = "End Stop Homes  ";
-	const static PROGMEM prog_uchar item5[]  = "End Stop Invert ";
-	const static PROGMEM prog_uchar item6[]  = "ZAxis Rev per mm";
-	const static PROGMEM prog_uchar item7[]	 = "Extru thermistor";
-	const static PROGMEM prog_uchar item8[]	 = "HBP thermistor  ";
-	const static PROGMEM prog_uchar item9[]	 = "Extru PID param "; 
-	const static PROGMEM prog_uchar item10[] = "HBP PID param   ";
-	const static PROGMEM prog_uchar item11[] = "Ouput Channels  ";
-	const static PROGMEM prog_uchar item12[] = "Homing FeedRate ";
+void DisplaySteps::update(LiquidCrystal& lcd, bool forceRedraw) {
+	if (forceRedraw) {
+		lcd.clear();
+	lcd.setCursor(0,0);
+	lcd.writeFixedPoint(eeprom::getEepromInt64(mbeeprom::STEPS_PER_MM_X, 90909), STEPS_PER_MM_PADDING, STEPS_PER_MM_PRECISION);
+	lcd.setCursor(0,1);
+	lcd.writeFixedPoint(eeprom::getEepromInt64(mbeeprom::STEPS_PER_MM_Y, 90909), STEPS_PER_MM_PADDING, STEPS_PER_MM_PRECISION);
+	lcd.setCursor(0,2);
+	lcd.writeFixedPoint(eeprom::getEepromInt64(mbeeprom::STEPS_PER_MM_Z, 90909), STEPS_PER_MM_PADDING, STEPS_PER_MM_PRECISION);
+	lcd.setCursor(0,3);
+	lcd.writeFixedPoint(eeprom::getEepromInt64(mbeeprom::STEPS_PER_MM_A, 90909), STEPS_PER_MM_PADDING, STEPS_PER_MM_PRECISION);
+}
+}
 
-	switch (index) {
-	case 0:
-		lcd.writeFromPgmspace(item1);
-		break;
-	case 1:
-		lcd.writeFromPgmspace(item2);
-		break;
-	case 2:
-		lcd.writeFromPgmspace(item3);
-		break;
-  case 3:
-		lcd.writeFromPgmspace(item4);
-		break;
-	case 4:
-		lcd.writeFromPgmspace(item5);
-		break;
-	case 5:
-		lcd.writeFromPgmspace(item6);
-		break;
-	case 6:
-		lcd.writeFromPgmspace(item7);
-		break;
-	case 7:
-		lcd.writeFromPgmspace(item8);
-		break;
-	case 8:
-		lcd.writeFromPgmspace(item9);
-		break;
-	case 9:
-		lcd.writeFromPgmspace(item10);
-		break;
-	case 10:
-		lcd.writeFromPgmspace(item11);
-		break;
-	case 11:
-		lcd.writeFromPgmspace(item12);
-		break;
+void DisplaySteps::notifyButtonPressed(ButtonArray::ButtonName button) {
+	interface::popScreen();
+	return;
+}
+*/
+
+void StepsPerMMMode::reset() {
+	lastStepsPerMMState = SPM_NONE;
+	stepsPerMMState	    = SPM_THINGO;
+	cursorLocation	    = 0;
+	
+  AxisPerMM::invalidate();
+  AxisPerMM::populateAxisArray();
+}
+
+void StepsPerMMMode::populateDefaults(enum StepsPerMMState stepsPerMMState) {	
+	switch(stepsPerMMState) {
+			case SPM_THINGO:
+					AxisPerMM::setAxis(AxisPerMM::AXIS_X,470698520000ull);
+					AxisPerMM::setAxis(AxisPerMM::AXIS_Y,470698520000ull);
+					AxisPerMM::setAxis(AxisPerMM::AXIS_Z,2000000000000ull);
+					AxisPerMM::setAxis(AxisPerMM::AXIS_A,502354788069ull);
+					AxisPerMM::setAxis(AxisPerMM::AXIS_B,502354788069ull);
+				break;
+			case SPM_CUPCAKE:
+					AxisPerMM::setAxis(AxisPerMM::AXIS_X,470698520000ull);
+					AxisPerMM::setAxis(AxisPerMM::AXIS_Y,470698520000ull);
+					AxisPerMM::setAxis(AxisPerMM::AXIS_Z,12800000000000ull);
+					AxisPerMM::setAxis(AxisPerMM::AXIS_A,502354788069ull);
+					AxisPerMM::setAxis(AxisPerMM::AXIS_B,502354788069ull);
+				break;
+			case SPM_ULTIMAKER:
+					AxisPerMM::setAxis(AxisPerMM::AXIS_X,470698520000ull);
+					AxisPerMM::setAxis(AxisPerMM::AXIS_Y,470698520000ull);
+					AxisPerMM::setAxis(AxisPerMM::AXIS_Z,1600000000000ull);
+					AxisPerMM::setAxis(AxisPerMM::AXIS_A,18000000000000ull);
+					AxisPerMM::setAxis(AxisPerMM::AXIS_B,18000000000000ull);
+				break;
+			case SPM_REPRAP:
+					AxisPerMM::setAxis(AxisPerMM::AXIS_X,314960000000ull);
+					AxisPerMM::setAxis(AxisPerMM::AXIS_Y,314960000000ull);
+					AxisPerMM::setAxis(AxisPerMM::AXIS_Z,11338580000000ull);
+					AxisPerMM::setAxis(AxisPerMM::AXIS_A,10000000000000ull);
+					AxisPerMM::setAxis(AxisPerMM::AXIS_B,10000000000000ull);
+				break;
 	}
+				
 }
 
-void MBMenu::handleSelect(uint8_t index) {
-	switch (index) {
-		case 0:
-			interface::pushScreen(&notyetimplemented);
-			break;
-		case 1:
-			interface::pushScreen(&notyetimplemented);
-			break;
-		case 2:
-			interface::pushScreen(&notyetimplemented);
-			break;
-	  case 3:
-			interface::pushScreen(&notyetimplemented);
-			break;
-		case 4:
-			interface::pushScreen(&notyetimplemented);
-			break;
-		case 5:
-			interface::pushScreen(&zaxisrevs);
-			break;
-		case 6:
-			interface::pushScreen(&extrutherm);
-			break;
-		case 7:
-			interface::pushScreen(&nbptherm);
-			break;
-		case 8:
-			interface::pushScreen(&extpid);
-			break;
-		case 9:
-			interface::pushScreen(&hbppid);
-			break;
-		case 10:
-			interface::pushScreen(&notyetimplemented);
-			break;
-		case 11:
-			interface::pushScreen(&notyetimplemented);
+#define STEPS_PER_MM_INCREMENT	0.000001
+
+void StepsPerMMMode::update(LiquidCrystal& lcd, bool forceRedraw) {
+	const static PROGMEM prog_uchar msg1[]      = "Select Machine";
+	const static PROGMEM prog_uchar msg2[]      = "use <> to choose";
+	const static PROGMEM prog_uchar msg3[]      = "Key 0 to modify";
+	const static PROGMEM prog_uchar machine1[]  = "Thing-o-matic";
+	const static PROGMEM prog_uchar machine2[]  = "Cupcake";
+	const static PROGMEM prog_uchar machine3[]  = "RepRap5d";
+	const static PROGMEM prog_uchar machine4[]  = "Ultimaker";
+	const static PROGMEM prog_uchar machine5[]  = "Custom";
+	const static PROGMEM prog_uchar message1x[] = "X Steps per mm:";
+	const static PROGMEM prog_uchar message1y[] = "Y Steps per mm:";
+	const static PROGMEM prog_uchar message1z[] = "Z Steps per mm:";
+	const static PROGMEM prog_uchar message1a[] = "A Steps per mm:";
+	const static PROGMEM prog_uchar message1b[] = "B Steps per mm:";
+	const static PROGMEM prog_uchar message4[]  = "Up/Dn/Ent to Set";
+	const static PROGMEM prog_uchar blank[]     = "  ";
+
+	if ( stepsPerMMState != lastStepsPerMMState )	forceRedraw = true;
+
+	if (forceRedraw) {
+		lcd.noCursor();
+		lcd.clear();
+
+		lcd.setCursor(0,0);
+		switch(stepsPerMMState) {
+			case SPM_THINGO:
+			case SPM_CUPCAKE:
+			case SPM_REPRAP:
+			case SPM_ULTIMAKER:
+			case SPM_CUSTOM:
+				lcd.writeFromPgmspace(msg1);
+				lcd.setCursor(0,1);
+				lcd.writeFromPgmspace(msg2);
+				lcd.setCursor(0,2);
+				lcd.writeFromPgmspace(msg3);
+				lcd.setCursor(0,3);
+				break;
+			default:
+				lcd.setCursor(0,3);
+				lcd.writeFromPgmspace(message4);
+				break;
+		}
+		
+		switch(stepsPerMMState) {
+			case SPM_THINGO:
+				lcd.writeFromPgmspace(machine1);
+				break;
+			case SPM_CUPCAKE:
+				lcd.writeFromPgmspace(machine2);
+				break;
+			case SPM_REPRAP:
+				lcd.writeFromPgmspace(machine3);
+				break;
+			case SPM_ULTIMAKER:
+				lcd.writeFromPgmspace(machine4);
+				break;
+			case SPM_CUSTOM:
+				lcd.writeFromPgmspace(machine5);
+				break;
+			default:
+				lcd.setCursor(0,0);
+		}
+		switch(stepsPerMMState) {	
+			case SPM_SET_X:
+				lcd.writeFromPgmspace(message1x);
+				break;
+      case SPM_SET_Y:
+				lcd.writeFromPgmspace(message1y);
+				break;
+     	case SPM_SET_Z:
+				lcd.writeFromPgmspace(message1z);
+				break;
+     	case SPM_SET_A:
+				lcd.writeFromPgmspace(message1a);
+				break;
+			case SPM_SET_B:
+				lcd.writeFromPgmspace(message1b);
+				break;
+		}
+	}
+
+	switch(stepsPerMMState) {
+			case SPM_THINGO:
+			case SPM_CUPCAKE:
+			case SPM_REPRAP:
+			case SPM_ULTIMAKER:
+			case SPM_CUSTOM:
+				break;
+			default:
+				int64_t spm = 0;
+			
+				switch(stepsPerMMState) {
+					case SPM_SET_X:
+						spm =  AxisPerMM::getAxis(AxisPerMM::AXIS_X);
+						break;
+					case SPM_SET_Y:
+						spm =  AxisPerMM::getAxis(AxisPerMM::AXIS_Y);
+						break;
+					case SPM_SET_Z:
+						spm =  AxisPerMM::getAxis(AxisPerMM::AXIS_Z);
+						break;
+					case SPM_SET_A:
+						spm =  AxisPerMM::getAxis(AxisPerMM::AXIS_A);
+						break;
+					case SPM_SET_B:
+						spm =  AxisPerMM::getAxis(AxisPerMM::AXIS_B);
+						break;
+				}
+			
+				//Write the number
+				lcd.setCursor(0,1);
+				lcd.writeFixedPoint(spm, STEPS_PER_MM_PADDING, STEPS_PER_MM_PRECISION);
+			
+				//Draw the cursor
+				lcd.setCursor(cursorLocation,1);
+				lcd.cursor();
+				/*lcd.write('^');
+			
+				//Write a blank before and after the cursor if we're not at the ends
+				if ( cursorLocation >= 1 ) {
+					lcd.setCursor(cursorLocation-1, 2);
+					lcd.writeFromPgmspace(blank);
+				}
+				if ( cursorLocation < 15 ) {
+					lcd.setCursor(cursorLocation+1, 2);
+					lcd.writeFromPgmspace(blank);
+				}*/
 			break;
 		}
+
+	lastStepsPerMMState = stepsPerMMState;
 }
 
-void ZAxisRevs::update(LiquidCrystal& lcd, bool forceRedraw) {
-	static PROGMEM prog_uchar line1[]   = "ZAxis rev per mm";
-	static PROGMEM prog_uchar choice0[] = "Thing-o-matic";
-	static PROGMEM prog_uchar choice1[] = "Cupcake";
-	static PROGMEM prog_uchar choice2[] = "Ultimaker";
-	static PROGMEM prog_uchar choice3[] = "RepRap";
-	static PROGMEM prog_uchar choice4[] = "Mendel";
-	static PROGMEM prog_uchar choice5[] = "Custom";
-	static PROGMEM prog_uchar hat[] = "^";
-	if (forceRedraw) {
-		lcd.setCursor(0,0);
-		lcd.writeFromPgmspace(line1);
-	} 
-	lcd.writeBlankLine(1);
-	switch(selSize) {
-		case(0):
-			lcd.setCursor(0,1);
-			lcd.writeFromPgmspace(choice0);
-		break;
-		case(1):
-			lcd.setCursor(0,1);
-			lcd.writeFromPgmspace(choice1);
-		break;
-		case(2):
-			lcd.setCursor(0,1);
-			lcd.writeFromPgmspace(choice2);
-		break;
-		case(3):
-			lcd.setCursor(0,1);
-			lcd.writeFromPgmspace(choice3);
-		break;
-		case(4):
-			lcd.setCursor(0,1);
-			lcd.writeFromPgmspace(choice4);
-		break;
-		default:
-			lcd.setCursor(0,1);
-			lcd.writeFromPgmspace(choice5);
-	}
-	lcd.writeBlankLine(3);
-	if (selSize>4) {
-		if (selSize>8)lcd.setCursor(selSize-4,3);
-		else lcd.setCursor(selSize-5,3);
-		lcd.writeFromPgmspace(hat);
-	}
+void StepsPerMMMode::notifyButtonPressed(ButtonArray::ButtonName button) {
+	
+	switch(stepsPerMMState) {
+			case SPM_THINGO:
+			case SPM_CUPCAKE:
+			case SPM_REPRAP:
+			case SPM_ULTIMAKER:
+			case SPM_CUSTOM:
+				switch (button) {
+					case ButtonArray::CANCEL:
+						interface::popScreen();
+						return;
+					case ButtonArray::XMINUS:
+						if (stepsPerMMState != SPM_THINGO) stepsPerMMState = (enum StepsPerMMState)((uint8_t)stepsPerMMState - 1);
+						break;
+					case ButtonArray::XPLUS:
+						if (stepsPerMMState != SPM_CUSTOM) stepsPerMMState = (enum StepsPerMMState)((uint8_t)stepsPerMMState + 1);
+						break;
+					case ButtonArray::ZERO:
+						populateDefaults(stepsPerMMState);
+						stepsPerMMState=SPM_SET_X;
+						break;
+					case ButtonArray::OK:
+						switch(stepsPerMMState) {
+							case SPM_THINGO:
+							case SPM_CUPCAKE:
+							case SPM_ULTIMAKER:
+							case SPM_REPRAP:
+								populateDefaults(stepsPerMMState);
+								AxisPerMM::saveValues();
+								interface::popScreen();
+								break;
+							case SPM_CUSTOM:
+								populateDefaults(stepsPerMMState);
+								stepsPerMMState=SPM_SET_X;
+								break;
+							}
+					}
+				break;
+			default:
+				int64_t spm;
+				uint16_t offset;
+				uint8_t currentIndex = stepsPerMMState - SPM_SET_X;
 			
-	lcd.writeBlankLine(2);
-	lcd.setCursor(0,2);
-	lcd.writeInt(wholePart,4);
-	lcd.writeString(".");
-	lcd.writeInt(fracPart,4);
-	lcd.writeString("mm");
-	
-}
-
-void ZAxisRevs::notifyButtonPressed(ButtonArray::ButtonName button) {
-	switch (button) {
- 	  case ButtonArray::CANCEL:
-		  interface::popScreen();
-		break;
-		case ButtonArray::OK:
-			eeprom_write_word((uint16_t*)mbeeprom::ZAXIS_MM_PER_TURN_W,wholePart);
-			eeprom_write_word((uint16_t*)mbeeprom::ZAXIS_MM_PER_TURN_P,fracPart);
-		  interface::popScreen();
-		break;
-		case ButtonArray::XMINUS:
-			if (selSize>4) selSize--;
-		break;
-		case ButtonArray::XPLUS:
-			selSize++;
-			if (selSize>12) selSize=12;
-		break;
-		case ButtonArray::YMINUS:
-			if (selSize<5) selSize++;
-			else {
-				if (selSize<9) {
-					wholePart=wholePart-(pow(10,3-(selSize-5)));
-					if (wholePart>9999) wholePart=9999;
-				} else {
-					fracPart=fracPart-(pow(10,3-(selSize-9)));
-					if (fracPart>9999) fracPart=9999;
+				spm = AxisPerMM::getAxis(currentIndex);
+			
+				//Calculate the increment based on the cursor location, allowing
+				//for the decimal point
+				int64_t increment = 1;
+				for (uint8_t i = (STEPS_PER_MM_PADDING + STEPS_PER_MM_PRECISION); i >= 0; i -- ) {
+					if ( i == cursorLocation ) break;
+					if ( i != STEPS_PER_MM_PADDING ) increment *= 10;
 				}
-			}
-		break;
-		case ButtonArray::YPLUS:
-			if (selSize<5) selSize--;
-			else {
-				if (selSize<9) {
-					wholePart=wholePart+(pow(10,3-(selSize-5)));
-					if (wholePart>9999) wholePart=0;
-				} else {
-					fracPart=fracPart+(pow(10,3-(selSize-9)));
-					if (fracPart>9999) fracPart=0;
+				
+				//Don't increment if we're sitting on the decimcal point
+				if ( cursorLocation == STEPS_PER_MM_PADDING )	increment = 0;
+			
+				switch (button) {
+					case ButtonArray::CANCEL:
+						AxisPerMM::invalidate();
+						AxisPerMM::populateAxisArray();
+						interface::getLcd().noCursor();
+						interface::popScreen();
+						return;
+					case ButtonArray::ZERO:
+						break;
+					case ButtonArray::OK:
+						if ( stepsPerMMState == SPM_SET_B ) {
+							AxisPerMM::saveValues();
+							interface::getLcd().noCursor();
+							interface::popScreen();
+						}
+						else {
+							//Increment to the next index
+							stepsPerMMState = (enum StepsPerMMState)((uint8_t)stepsPerMMState + 1);
+							cursorLocation	    = 0;
+						}
+						return;
+					case ButtonArray::YPLUS:
+					case ButtonArray::ZPLUS:
+						// increment
+						spm += increment;
+						break;
+					case ButtonArray::YMINUS:
+					case ButtonArray::ZMINUS:
+						// decrement
+						spm -= increment;
+						break;
+					case ButtonArray::XMINUS:
+						if ( cursorLocation > 0 )	cursorLocation --;
+						if ( cursorLocation == STEPS_PER_MM_PADDING) cursorLocation--;
+						break;
+					case ButtonArray::XPLUS:
+						if ( cursorLocation < 15 ) 	cursorLocation ++;
+						if ( cursorLocation == STEPS_PER_MM_PADDING) cursorLocation++;
+						break;
 				}
+			
+				//Hard limits
+				if ( spm >= STEPS_PER_MM_UPPER_LIMIT ) spm = STEPS_PER_MM_UPPER_LIMIT;
+			        if ( spm <= STEPS_PER_MM_LOWER_LIMIT ) spm = STEPS_PER_MM_LOWER_LIMIT;
+			
+				AxisPerMM::setAxis(currentIndex,spm);
 			}
-		break;
-	}
-	
-	switch(selSize){
-		case 0:
-			wholePart=200;
-			fracPart=0;
-		break;
-		case 1:
-			wholePart=1280;
-			fracPart=0;
-		break;
-		case 2:
-			wholePart=160;
-			fracPart=0;
-		break;
-		case 3:
-			wholePart=1133;
-			fracPart=8580;
-		break;
-		case 4:
-			wholePart=160;
-			fracPart=0;
-		break;
-	}
-}
-
-void ZAxisRevs::reset() {
-	wholePart=eeprom::getEeprom16(mbeeprom::ZAXIS_MM_PER_TURN_W,200);
-  fracPart=eeprom::getEeprom16(mbeeprom::ZAXIS_MM_PER_TURN_P,0);
-  if (wholePart==200 && fracPart==0) selSize=0;
-  else if (wholePart==1280 && fracPart==0) selSize=1;
-  else if (wholePart==160 && fracPart==0) selSize=2;
-  else if (wholePart==1133 && fracPart==8580) selSize=3;
-  else if (wholePart==160 && fracPart==0) selSize=4;
-  else selSize=5; 				
 }
 
 void thermUpdate(LiquidCrystal& lcd, bool forceRedraw,uint16_t& beta,uint32_t& ohms,uint8_t& base,uint8_t& xpos,uint8_t& ypos) {
@@ -458,11 +536,11 @@ void pidUpdate(LiquidCrystal& lcd, bool forceRedraw,float& ppid,float& ipid,floa
 		lcd.writeFromPgmspace(line4);
 	} 
 	lcd.setCursor(2,1);
-	lcd.writeFloat(ppid,7,3);
+	lcd.writeFloat(ppid,3,3);
 	lcd.setCursor(2,2);
-	lcd.writeFloat(ipid,7,3);
+	lcd.writeFloat(ipid,3,3);
 	lcd.setCursor(2,3);
-	lcd.writeFloat(dpid,7,3);
+	lcd.writeFloat(dpid,3,3);
 	lcd.cursor();
 	lcd.blink();
 	lcd.setCursor(xpos,ypos);
@@ -498,7 +576,11 @@ void pidWrite(float& ppid,float& ipid,float& dpid,uint16_t pidTable){
 	cnt[2]=(uint8_t)((float)(ppid-floor(ppid))*256.0);
 	extruderControl(SLAVE_CMD_WRITE_TO_EEPROM, EXTDR_CMD_SET, responsePacket, pidTable+extrudereeprom::P_TERM_OFFSET,cnt);
 	extruderControl(SLAVE_CMD_READ_FROM_EEPROM, EXTDR_CMD_SET, responsePacket, pidTable+extrudereeprom::P_TERM_OFFSET,cnt);	
-	temp=((float)responsePacket.read8(1)) + ((float)responsePacket.read8(2))/256.0;
+	lcd.setCursor(0,1);
+	lcd.writeInt(cnt[1],3);
+	lcd.setCursor(0,2);
+	lcd.writeInt(cnt[2],3);
+	/*temp=((float)responsePacket.read8(1)) + ((float)responsePacket.read8(2))/256.0;
 	lcd.setCursor(0,1);
 	lcd.writeFloat(temp,7,3);
 	cnt[0]=2;
@@ -516,7 +598,7 @@ void pidWrite(float& ppid,float& ipid,float& dpid,uint16_t pidTable){
 	temp=((float)responsePacket.read8(1)) + ((float)responsePacket.read8(2))/256.0;
 	lcd.setCursor(0,3);
 	lcd.writeFloat(temp,7,3);
-	extruderControl(SLAVE_CMD_WRITE_TO_EEPROM, EXTDR_CMD_SET, responsePacket, pidTable+extrudereeprom::D_TERM_OFFSET,cnt);
+	extruderControl(SLAVE_CMD_WRITE_TO_EEPROM, EXTDR_CMD_SET, responsePacket, pidTable+extrudereeprom::D_TERM_OFFSET,cnt);*/
 }
 
 void pidButtonPressed(ButtonArray::ButtonName button,float& ppid,float& ipid,float& dpid,uint8_t& xpos,uint8_t& ypos) {
@@ -538,7 +620,7 @@ void pidButtonPressed(ButtonArray::ButtonName button,float& ppid,float& ipid,flo
 		break;
 		case ButtonArray::XPLUS:
 			xpos++;
-			if (xpos>11) xpos=11;
+			if (xpos>8) xpos=8;
 			if (xpos==5) xpos=6;
 		break;
 		case ButtonArray::YPLUS:
@@ -564,7 +646,7 @@ void pidButtonPressed(ButtonArray::ButtonName button,float& ppid,float& ipid,flo
 			} else {
 				tempfloat=tempfloat+(float)(1.0/(float)pow(10,xpos-5));
 			} 
-			if (tempfloat>=255.0) tempfloat=255.9999999;	
+			if (tempfloat>=256.0) tempfloat=255.999;	
 			if (ypos==1) {
 				ppid=tempfloat;
 			} else if (ypos==2) {
@@ -714,4 +796,100 @@ void EndStopAxis::notifyButtonPressed(ButtonArray::ButtonName button) {
 }
 	
 void EndStopAxis::reset() {
+}
+
+
+
+MBMenu::MBMenu() {
+	itemCount = 14;
+	reset();
+}
+
+void MBMenu::drawItem(uint8_t index, LiquidCrystal& lcd) {
+	const static PROGMEM prog_uchar item1[]  = "Axis Steps:mm   ";
+	const static PROGMEM prog_uchar item2[]	 = "Extru thermistor";
+	const static PROGMEM prog_uchar item3[]	 = "HBP thermistor  ";
+	const static PROGMEM prog_uchar item4[]  = "Setup Menu < X- "; 
+	const static PROGMEM prog_uchar item5[]	 = "*Extru PID param"; 
+	const static PROGMEM prog_uchar item6[]  = "*HBP PID param  ";
+	const static PROGMEM prog_uchar item7[]  = "*Machine Name   ";
+	const static PROGMEM prog_uchar item8[]  = "*Invert Axis    ";
+	const static PROGMEM prog_uchar item9[]  = "*EStop Installed";
+	const static PROGMEM prog_uchar item10[] = "*End Stop Homes ";
+	const static PROGMEM prog_uchar item11[] = "*End Stop Invert";
+	const static PROGMEM prog_uchar item12[] = "*Ouput Channels ";
+	const static PROGMEM prog_uchar item13[] = "*Homing FeedRate";
+	const static PROGMEM prog_uchar item14[] = "*Toolhead Prefs ";
+
+	switch (index) {
+	case 0:
+		lcd.writeFromPgmspace(item1);
+		break;
+	case 1:
+		lcd.writeFromPgmspace(item2);
+		break;
+	case 2:
+		lcd.writeFromPgmspace(item3);
+		break;
+	case 3:
+		lcd.writeFromPgmspace(item4);
+		break;
+	case 4:
+		lcd.writeFromPgmspace(item5);
+		break;
+	case 5:
+		lcd.writeFromPgmspace(item6);
+		break;
+	case 6:
+		lcd.writeFromPgmspace(item7);
+		break;
+	case 7:
+		lcd.writeFromPgmspace(item8);
+		break;
+	case 8:
+		lcd.writeFromPgmspace(item9);
+		break;
+  case 9:
+		lcd.writeFromPgmspace(item10);
+		break;
+	case 10:
+		lcd.writeFromPgmspace(item11);
+		break;
+	case 11:
+		lcd.writeFromPgmspace(item12);
+		break;
+	case 12:
+		lcd.writeFromPgmspace(item13);
+		break;
+	case 13:
+		lcd.writeFromPgmspace(item14);
+		break;
+	}
+}
+
+void MBMenu::handleSelect(uint8_t index) {
+	switch (index) {
+		case 0:
+			interface::pushScreen(&stepsPerMMMode);
+			break;
+		case 1:
+			interface::pushScreen(&extrutherm);
+			break;
+		case 2:
+			interface::pushScreen(&nbptherm);
+			break;
+		case 3:
+			interface::popScreen();
+			break;
+		default:
+			interface::pushScreen(&notyetimplemented);
+		}
+}
+
+void MBMenu::handleButtonPressed(ButtonArray::ButtonName button,uint8_t index, uint8_t subIndex) {
+	switch (button) {
+		case ButtonArray::XMINUS:
+			interface::popScreen();
+			break;
+	}
 }
